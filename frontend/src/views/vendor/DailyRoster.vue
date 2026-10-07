@@ -118,30 +118,38 @@
 
             <div class="grid grid-cols-5 gap-2 border border-slate-200 bg-slate-50 rounded-lg p-3">
               <div>
-                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Calories</label>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Est. Calories</label>
                 <input type="number" v-model.number="formData.macros.calories" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
               </div>
               <div>
-                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Protein (g)</label>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Est. Protein (g)</label>
                 <input type="number" v-model.number="formData.macros.protein_g" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
               </div>
               <div>
-                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Carbs (g)</label>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Est. Carbs (g)</label>
                 <input type="number" v-model.number="formData.macros.carbs_g" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
               </div>
               <div>
-                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fat (g)</label>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Est. Fat (g)</label>
                 <input type="number" v-model.number="formData.macros.fat_g" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
               </div>
               <div>
-                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Sodium (mg)</label>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Est. Sodium (mg)</label>
                 <input type="number" v-model.number="formData.macros.sodium_mg" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
               </div>
             </div>
+            <p class="text-[10px] text-slate-500 mb-4 mt-1 italic">Note: Macronutrients are AI-generated estimates based on standard portions. Please review and adjust if necessary.</p>
 
             <div>
               <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Ingredients (Comma separated)</label>
               <input type="text" v-model="formData.ingredientsString" class="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-emerald-500 font-medium text-sm" placeholder="e.g. Pork Belly, Soy Sauce, Garlic">
+            </div>
+
+            <div class="mt-4 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+               <label class="flex items-start space-x-2 cursor-pointer">
+                 <input type="checkbox" v-model="formData.ai_confirmed" class="mt-0.5 w-4 h-4 text-amber-600 rounded border-amber-300 focus:ring-amber-500 cursor-pointer">
+                 <span class="text-xs font-bold text-amber-900">I have reviewed and confirm these ingredients and macro estimates.</span>
+               </label>
             </div>
 
             <div>
@@ -263,6 +271,7 @@ const formData = reactive({
   base_price: 50,
   ingredientsString: '',
   macros: { calories: null, protein_g: null, carbs_g: null, fat_g: null, sodium_mg: null },
+  ai_confirmed: false,
   allergens: [],
   dietary: [],
   sensitivities: [],
@@ -340,6 +349,7 @@ const openEditModal = (item) => {
   formData.base_price = item.base_price
   formData.ingredientsString = (item.ingredients || []).join(', ')
   formData.macros = item.macros ? { ...item.macros } : { calories: null, protein_g: null, carbs_g: null, fat_g: null, sodium_mg: null }
+  formData.ai_confirmed = item.ai_confirmed || false
   formData.allergens = [...(item.allergens || [])]
   formData.dietary = [...(item.dietary || [])]
   formData.sensitivities = [...(item.sensitivities || [])]
@@ -361,6 +371,7 @@ const closeModal = () => {
   formData.base_price = 50
   formData.ingredientsString = ''
   formData.macros = { calories: null, protein_g: null, carbs_g: null, fat_g: null, sodium_mg: null }
+  formData.ai_confirmed = false
   formData.allergens = []
   formData.dietary = []
   formData.sensitivities = []
@@ -390,6 +401,11 @@ const addNewAllergen = () => {
 }
 
 const saveDish = () => {
+  if (formData.macros.calories !== null && formData.macros.calories !== '' && !formData.ai_confirmed) {
+    showToast('Please review and confirm the ingredients and macros before saving.', 'error')
+    return
+  }
+
   const ingredients = formData.ingredientsString.split(',').map(s => s.trim()).filter(Boolean)
   
   if (editItem.value) {
@@ -413,6 +429,7 @@ const saveDish = () => {
       allergens: [...formData.allergens],
       dietary: [...formData.dietary],
       sensitivities: [...formData.sensitivities],
+      ai_confirmed: formData.ai_confirmed,
       decay: 30 // default decay
     }
     
@@ -446,6 +463,8 @@ const launchMenu = () => {
     stock: item.stock,
     decay: item.decay || 30,
     ingredients: item.ingredients,
+    macros: item.macros,
+    ai_confirmed: item.ai_confirmed,
     allergens: item.allergens,
     dietary: item.dietary,
     sensitivities: item.sensitivities
