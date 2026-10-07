@@ -206,3 +206,86 @@ function handleEnrichDish($pdo) {
     
     jsonResponse(['error' => 'Invalid AI Response Format'], 502);
 }
+
+function handleSaveDish($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (empty($input['name']) || empty($input['base_price'])) {
+        jsonResponse(['error' => 'Missing required fields'], 400);
+    }
+    
+    $dishId = isset($input['id']) ? $input['id'] : null;
+    
+    $calories = isset($input['macros']['calories']) ? $input['macros']['calories'] : null;
+    $protein_g = isset($input['macros']['protein_g']) ? $input['macros']['protein_g'] : null;
+    $carbs_g = isset($input['macros']['carbs_g']) ? $input['macros']['carbs_g'] : null;
+    $fat_g = isset($input['macros']['fat_g']) ? $input['macros']['fat_g'] : null;
+    $sodium_mg = isset($input['macros']['sodium_mg']) ? $input['macros']['sodium_mg'] : null;
+    $ai_confirmed = !empty($input['ai_confirmed']) ? 1 : 0;
+    
+    if ($dishId) {
+        $stmt = $pdo->prepare("
+            UPDATE menu_items 
+            SET name = ?, description = ?, base_price = ?, price_floor = ?, image_url = ?,
+                calories = ?, protein_g = ?, carbs_g = ?, fat_g = ?, sodium_mg = ?, ai_confirmed = ?
+            WHERE id = ? AND store_id = ?
+        ");
+        $stmt->execute([
+            $input['name'], 
+            isset($input['description']) ? $input['description'] : null,
+            $input['base_price'],
+            isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
+            isset($input['image_url']) ? $input['image_url'] : null,
+            $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
+            $dishId, $store_id
+        ]);
+        
+        $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$dishId]);
+        $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$dishId]);
+    } else {
+        $stmt = $pdo->prepare("
+            INSERT INTO menu_items (store_id, name, description, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([
+            $store_id,
+            $input['name'],
+            isset($input['description']) ? $input['description'] : null,
+            $input['base_price'],
+            isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
+            isset($input['image_url']) ? $input['image_url'] : null,
+            $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed
+        ]);
+        $dishId = $pdo->lastInsertId();
+    }
+    
+    if (!empty($input['ingredientsString'])) {
+        $ingredients = array_filter(array_map('trim', explode(',', $input['ingredientsString'])));
+        
+        foreach ($ingredients as $ing) {
+            $stmt = $pdo->prepare("INSERT IGNORE INTO ingredients (name) VALUES (?)");
+            $stmt->execute([$ing]);
+            
+            $stmt = $pdo->prepare("SELECT id FROM ingredients WHERE name = ?");
+            $stmt->execute([$ing]);
+            $ingId = $stmt->fetchColumn();
+            
+            if ($ingId) {
+                $pdo->prepare("INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES (?, ?)")
+                    ->execute([$dishId, $ingId]);
+                    
+                $stmtMap = $pdo->prepare("SELECT allergen_id FROM ingredient_allergen_map WHERE ingredient_id = ?");
+                $stmtMap->execute([$ingId]);
+                $allergens = $stmtMap->fetchAll(PDO::FETCH_COLUMN);
+                
+                foreach ($allergens as $allergenId) {
+                    $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)")
+                        ->execute([$dishId, $allergenId]);
+                }
+            }
+        }
+    }
+    
+    jsonResponse(['message' => 'Dish saved', 'id' => $dishId]);
+}
