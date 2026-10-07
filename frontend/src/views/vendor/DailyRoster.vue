@@ -108,6 +108,37 @@
               </div>
             </div>
 
+            <div class="flex justify-end pt-2 mb-2">
+              <button @click.prevent="enrichDish" :disabled="isEnriching" class="text-xs font-bold bg-indigo-50 text-indigo-600 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 disabled:opacity-50">
+                 <span v-if="isEnriching" class="animate-spin text-indigo-500">⏳</span>
+                 <span v-else>✨</span>
+                 {{ isEnriching ? 'Analyzing...' : 'Auto-fill with AI' }}
+              </button>
+            </div>
+
+            <div class="grid grid-cols-5 gap-2 border border-slate-200 bg-slate-50 rounded-lg p-3">
+              <div>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Calories</label>
+                <input type="number" v-model.number="formData.macros.calories" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
+              </div>
+              <div>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Protein (g)</label>
+                <input type="number" v-model.number="formData.macros.protein_g" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
+              </div>
+              <div>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Carbs (g)</label>
+                <input type="number" v-model.number="formData.macros.carbs_g" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
+              </div>
+              <div>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Fat (g)</label>
+                <input type="number" v-model.number="formData.macros.fat_g" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
+              </div>
+              <div>
+                <label class="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Sodium (mg)</label>
+                <input type="number" v-model.number="formData.macros.sodium_mg" class="w-full px-2 py-1.5 border border-slate-300 rounded-md outline-none focus:border-emerald-500 font-medium text-xs text-center bg-white">
+              </div>
+            </div>
+
             <div>
               <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Ingredients (Comma separated)</label>
               <input type="text" v-model="formData.ingredientsString" class="w-full px-3 py-2 border border-slate-300 rounded-lg outline-none focus:border-emerald-500 font-medium text-sm" placeholder="e.g. Pork Belly, Soy Sauce, Garlic">
@@ -186,9 +217,10 @@
     >
       <div 
         v-if="toast.show" 
-        class="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-emerald-900 text-emerald-100 border border-emerald-700 px-4 py-3 rounded-lg shadow-xl text-sm font-medium"
+        class="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl text-sm font-medium"
+        :class="toast.type === 'error' ? 'bg-rose-900 text-rose-100 border border-rose-700' : 'bg-emerald-900 text-emerald-100 border border-emerald-700'"
       >
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="w-2 h-2 rounded-full animate-pulse" :class="toast.type === 'error' ? 'bg-rose-400' : 'bg-emerald-400'"></span>
         {{ toast.message }}
       </div>
     </transition>
@@ -230,12 +262,52 @@ const formData = reactive({
   category: 'Ulam / Stews',
   base_price: 50,
   ingredientsString: '',
+  macros: { calories: null, protein_g: null, carbs_g: null, fat_g: null, sodium_mg: null },
   allergens: [],
   dietary: [],
   sensitivities: [],
   saveToCatalog: false,
   isAllergenFree: false
 })
+
+const isEnriching = ref(false)
+
+const enrichDish = async () => {
+  if (!formData.name.trim()) {
+    showToast('Please enter a dish name first.', 'error')
+    return
+  }
+
+  isEnriching.value = true
+  try {
+    const res = await fetch('/api/vendor/enrich-dish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: formData.name,
+        description: formData.description
+      })
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || data.fallback || data.error) {
+      showToast(data.error || 'AI currently unavailable. Please enter macros manually.', 'error')
+      return
+    }
+
+    formData.ingredientsString = (data.ingredients || []).join(', ')
+    if (data.macros) {
+      formData.macros = { ...data.macros }
+    }
+    showToast('Data auto-filled successfully!', 'success')
+
+  } catch (err) {
+    showToast('AI currently unavailable. Please enter macros manually.', 'error')
+  } finally {
+    isEnriching.value = false
+  }
+}
 
 const initRoster = () => {
   // Try to match active sandbox menu to catalog
@@ -267,6 +339,7 @@ const openEditModal = (item) => {
   formData.category = item.category
   formData.base_price = item.base_price
   formData.ingredientsString = (item.ingredients || []).join(', ')
+  formData.macros = item.macros ? { ...item.macros } : { calories: null, protein_g: null, carbs_g: null, fat_g: null, sodium_mg: null }
   formData.allergens = [...(item.allergens || [])]
   formData.dietary = [...(item.dietary || [])]
   formData.sensitivities = [...(item.sensitivities || [])]
@@ -287,6 +360,7 @@ const closeModal = () => {
   formData.description = ''
   formData.base_price = 50
   formData.ingredientsString = ''
+  formData.macros = { calories: null, protein_g: null, carbs_g: null, fat_g: null, sodium_mg: null }
   formData.allergens = []
   formData.dietary = []
   formData.sensitivities = []
