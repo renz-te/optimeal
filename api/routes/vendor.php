@@ -129,17 +129,64 @@ function handleEnrichDish($pdo) {
         jsonResponse(['error' => 'Missing or empty dish name'], 400);
     }
 
-    // Return hardcoded mock JSON payload
-    $mockResponse = [
-        'ingredients' => ['Pork', 'Soy Sauce', 'Vinegar'],
-        'macros' => [
-            'calories' => 450,
-            'protein_g' => 30,
-            'carbs_g' => 15,
-            'fat_g' => 25,
-            'sodium_mg' => 1200
+    $apiKey = getenv('GEMINI_API_KEY');
+    if (!$apiKey || $apiKey === 'your_api_key_here') {
+        jsonResponse(['error' => 'Server configuration error: Missing API Key'], 500);
+    }
+
+    $dishName = $input['name'];
+    $description = isset($input['description']) ? $input['description'] : '';
+    $portion = isset($input['portion']) ? $input['portion'] : '';
+
+    $systemInstruction = "You are a culinary data assistant. You MUST respond with ONLY raw JSON. Do NOT wrap the JSON in markdown code blocks (e.g. no ```json). Return an object with two keys: 'ingredients' (an array of strings) and 'macros' (an object with integer keys: calories, protein_g, carbs_g, fat_g, sodium_mg). You must estimate these values based on the dish name and description. CRITICAL RULE: Do NOT include or guess allergens (e.g. do not say 'Peanuts', 'Shellfish', 'Soy', etc.). Just list the core ingredients.";
+    
+    $userPrompt = "Dish Name: $dishName\nDescription: $description\nPortion: $portion\nGenerate the ingredients and macros JSON.";
+
+    $payload = [
+        "system_instruction" => [
+            "parts" => [
+                ["text" => $systemInstruction]
+            ]
+        ],
+        "contents" => [
+            [
+                "parts" => [
+                    ["text" => $userPrompt]
+                ]
+            ]
+        ],
+        "generationConfig" => [
+            "response_mime_type" => "application/json"
         ]
     ];
 
-    jsonResponse($mockResponse, 200);
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . $apiKey;
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode !== 200 || !$response) {
+        jsonResponse(['error' => 'AI Service Unavailable'], 502);
+    }
+
+    $responseData = json_decode($response, true);
+    
+    // Extract the text from the Gemini response
+    if (isset($responseData['candidates'][0]['content']['parts'][0]['text'])) {
+        $aiText = $responseData['candidates'][0]['content']['parts'][0]['text'];
+        $aiJson = json_decode($aiText, true);
+        
+        if (json_last_error() === JSON_ERROR_NONE && isset($aiJson['ingredients']) && isset($aiJson['macros'])) {
+            jsonResponse($aiJson, 200);
+        }
+    }
+    
+    jsonResponse(['error' => 'Invalid AI Response Format'], 502);
 }
