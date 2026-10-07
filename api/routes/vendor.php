@@ -138,7 +138,7 @@ function handleEnrichDish($pdo) {
     $description = isset($input['description']) ? $input['description'] : '';
     $portion = isset($input['portion']) ? $input['portion'] : '';
 
-    $systemInstruction = "You are a culinary data assistant. You MUST respond with ONLY raw JSON. Do NOT wrap the JSON in markdown code blocks (e.g. no ```json). Return an object with two keys: 'ingredients' (an array of strings) and 'macros' (an object with integer keys: calories, protein_g, carbs_g, fat_g, sodium_mg). You must estimate these values based on the dish name and description. CRITICAL RULE: Do NOT include or guess allergens (e.g. do not say 'Peanuts', 'Shellfish', 'Soy', etc.). Just list the core ingredients.";
+    $systemInstruction = "You are a culinary data assistant. You MUST respond with ONLY raw JSON. Do NOT wrap the JSON in markdown code blocks. Return an object with two keys: 'ingredients' (an array of strings listing all primary cooked ingredients) and 'macros' (an object with integer keys: calories, protein_g, carbs_g, fat_g, sodium_mg). CRITICAL RULE: List all actual ingredients accurately, including common allergen foods (e.g., list 'Peanut Butter', 'Shrimp', 'Egg Noodles', 'Soy Sauce' if used in the dish). Do NOT output any allergen keys, allergen tags, or safety disclaimers. Output ingredients and macros only.";
     
     $userPrompt = "Dish Name: $dishName\nDescription: $description\nPortion: $portion\nGenerate the ingredients and macros JSON.";
 
@@ -160,7 +160,7 @@ function handleEnrichDish($pdo) {
         ]
     ];
 
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . $apiKey;
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" . $apiKey;
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -173,7 +173,7 @@ function handleEnrichDish($pdo) {
     curl_close($ch);
 
     if ($httpCode !== 200 || !$response) {
-        jsonResponse(['error' => 'AI Service Unavailable'], 502);
+        jsonResponse(['error' => 'AI Service Unavailable', 'details' => json_decode($response, true)], 200);
     }
 
     $responseData = json_decode($response, true);
