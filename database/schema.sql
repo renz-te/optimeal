@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS menu_item_ingredients (
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
 );
 
+-- Critical Allergens table (immune-mediated, triggers blocking cart modal)
+CREATE TABLE IF NOT EXISTS critical_allergens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+
 -- Ingredient to Allergen Mapping table
 CREATE TABLE IF NOT EXISTS ingredient_allergen_map (
     ingredient_id INT NOT NULL,
@@ -63,12 +69,6 @@ CREATE TABLE IF NOT EXISTS ingredient_allergen_map (
     PRIMARY KEY (ingredient_id, allergen_id),
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
     FOREIGN KEY (allergen_id) REFERENCES critical_allergens(id) ON DELETE CASCADE
-);
-
--- Critical Allergens table (immune-mediated, triggers blocking cart modal)
-CREATE TABLE IF NOT EXISTS critical_allergens (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE
 );
 
 -- Digestive Sensitivities table (motility triggers, triggers a soft warning only, not a hard block)
