@@ -119,3 +119,27 @@ function handleGetVendorOrders($pdo) {
     $stmt->execute([$store_id]);
     jsonResponse($stmt->fetchAll());
 }
+
+function handleEnrichDish($pdo) {
+    // Parse incoming JSON payload
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    // Validate presence of name
+    if (empty($input['name'])) {
+        jsonResponse(['error' => 'Missing or empty dish name'], 400);
+    }
+
+    // Return hardcoded mock JSON payload
+    $mockResponse = [
+        'ingredients' => ['Pork', 'Soy Sauce', 'Vinegar'],
+        'macros' => [
+            'calories' => 450,
+            'protein_g' => 30,
+            'carbs_g' => 15,
+            'fat_g' => 25,
+            'sodium_mg' => 1200
+        ]
+    ];
+
+    jsonResponse($mockResponse, 200);
+}

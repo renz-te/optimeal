@@ -57,6 +57,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/orders' && $method === 'GET') {
     require 'routes/vendor.php';
     handleGetVendorOrders($pdo);
+} elseif ($route === '/vendor/enrich-dish' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleEnrichDish($pdo);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }
