@@ -135,6 +135,18 @@ function handleEnrichDish($pdo) {
     }
 
     $dishName = $input['name'];
+    $normalizedDishName = strtolower(trim($dishName));
+
+    $cacheStmt = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name = ?");
+    $cacheStmt->execute([$normalizedDishName]);
+    $cached = $cacheStmt->fetch();
+    if ($cached) {
+        $aiJson = json_decode($cached['response_payload'], true);
+        if ($aiJson) {
+            jsonResponse($aiJson, 200);
+        }
+    }
+
     $description = isset($input['description']) ? $input['description'] : '';
     $portion = isset($input['portion']) ? $input['portion'] : '';
 
@@ -172,8 +184,10 @@ function handleEnrichDish($pdo) {
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($httpCode !== 200 || !$response) {
-        jsonResponse(['error' => 'AI Service Unavailable', 'details' => json_decode($response, true)], 200);
+    if ($httpCode === 429 || $httpCode >= 500 || !$response) {
+        jsonResponse(['error' => 'AI rate limit exceeded or unavailable', 'fallback' => true], 503);
+    } elseif ($httpCode !== 200) {
+        jsonResponse(['error' => 'AI Service Error', 'fallback' => true], 502);
     }
 
     $responseData = json_decode($response, true);
@@ -184,6 +198,8 @@ function handleEnrichDish($pdo) {
         $aiJson = json_decode($aiText, true);
         
         if (json_last_error() === JSON_ERROR_NONE && isset($aiJson['ingredients']) && isset($aiJson['macros'])) {
+            $insertStmt = $pdo->prepare("INSERT IGNORE INTO ai_query_cache (dish_name, response_payload) VALUES (?, ?)");
+            $insertStmt->execute([$normalizedDishName, $aiText]);
             jsonResponse($aiJson, 200);
         }
     }
