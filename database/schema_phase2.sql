@@ -76,8 +76,11 @@ TRUNCATE TABLE pricing_rules;
 TRUNCATE TABLE inventory;
 TRUNCATE TABLE menu_item_digestive_sensitivities;
 TRUNCATE TABLE menu_item_critical_allergens;
+TRUNCATE TABLE menu_item_ingredients;
+TRUNCATE TABLE ingredient_allergen_map;
 TRUNCATE TABLE digestive_sensitivities;
 TRUNCATE TABLE critical_allergens;
+TRUNCATE TABLE ingredients;
 TRUNCATE TABLE menu_items;
 TRUNCATE TABLE stores;
 TRUNCATE TABLE users;
@@ -98,19 +101,19 @@ INSERT INTO stores (vendor_user_id, name, description) VALUES
 
 -- Seed Allergens & Sensitivities
 INSERT INTO critical_allergens (name) VALUES 
-('Peanuts'), ('Shellfish'), ('Eggs'), ('Dairy'), ('Tree Nuts');
+('Peanuts'), ('Shellfish'), ('Eggs'), ('Dairy'), ('Tree Nuts'), ('Soy');
 
 INSERT INTO digestive_sensitivities (name) VALUES 
 ('Coconut Milk/Gata'), ('Hot Pepper/Capsaicin'), ('Garlic'), ('Onion');
 
 -- Seed Menu Items
 -- Store 1: Alice's Canteen
-INSERT INTO menu_items (store_id, name, base_price, price_floor, description, is_active) VALUES 
-(1, 'Chicken Adobo', 60.00, 40.00, 'Classic Filipino chicken adobo.', 1),
-(1, 'Pork Sinigang', 75.00, 50.00, 'Sour tamarind soup with pork.', 1),
-(1, 'Bicol Express', 80.00, 55.00, 'Spicy pork belly cooked in coconut milk.', 1),
-(1, 'Tortang Talong', 45.00, 30.00, 'Eggplant omelette.', 1),
-(1, 'Peanut Kare-Kare', 90.00, 65.00, 'Beef stew in rich peanut sauce.', 1);
+INSERT INTO menu_items (store_id, name, base_price, price_floor, description, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed, is_active) VALUES 
+(1, 'Chicken Adobo', 60.00, 40.00, 'Classic Filipino chicken adobo.', 350, 25, 10, 20, 800, TRUE, 1),
+(1, 'Pork Sinigang', 75.00, 50.00, 'Sour tamarind soup with pork.', 280, 22, 12, 18, 950, TRUE, 1),
+(1, 'Bicol Express', 80.00, 55.00, 'Spicy pork belly cooked in coconut milk.', NULL, NULL, NULL, NULL, NULL, FALSE, 1),
+(1, 'Tortang Talong', 45.00, 30.00, 'Eggplant omelette.', NULL, NULL, NULL, NULL, NULL, FALSE, 1),
+(1, 'Peanut Kare-Kare', 90.00, 65.00, 'Beef stew in rich peanut sauce.', NULL, NULL, NULL, NULL, NULL, FALSE, 1);
 
 -- Store 2: Bob's Grill
 INSERT INTO menu_items (store_id, name, base_price, price_floor, description, is_active) VALUES 
@@ -145,6 +148,30 @@ INSERT INTO menu_item_digestive_sensitivities (menu_item_id, sensitivity_id) VAL
 INSERT INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES 
 (8, (SELECT id FROM critical_allergens WHERE name='Shellfish')),
 (8, (SELECT id FROM critical_allergens WHERE name='Dairy'));
+
+-- Seed Ingredients & Mappings
+INSERT INTO ingredients (name) VALUES 
+('Chicken Thigh'), ('Soy Sauce'), ('Cane Vinegar'), ('Garlic'),
+('Pork Ribs'), ('Tamarind Broth'), ('Radish'), ('Kangkong'),
+('Shrimp Paste'), ('Peanut Butter'), ('Egg Noodles');
+
+INSERT INTO ingredient_allergen_map (ingredient_id, allergen_id) VALUES 
+((SELECT id FROM ingredients WHERE name='Soy Sauce'), (SELECT id FROM critical_allergens WHERE name='Soy')),
+((SELECT id FROM ingredients WHERE name='Shrimp Paste'), (SELECT id FROM critical_allergens WHERE name='Shellfish')),
+((SELECT id FROM ingredients WHERE name='Peanut Butter'), (SELECT id FROM critical_allergens WHERE name='Peanuts')),
+((SELECT id FROM ingredients WHERE name='Egg Noodles'), (SELECT id FROM critical_allergens WHERE name='Eggs'));
+
+INSERT INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES 
+(1, (SELECT id FROM ingredients WHERE name='Chicken Thigh')),
+(1, (SELECT id FROM ingredients WHERE name='Soy Sauce')),
+(1, (SELECT id FROM ingredients WHERE name='Cane Vinegar')),
+(1, (SELECT id FROM ingredients WHERE name='Garlic'));
+
+INSERT INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES 
+(2, (SELECT id FROM ingredients WHERE name='Pork Ribs')),
+(2, (SELECT id FROM ingredients WHERE name='Tamarind Broth')),
+(2, (SELECT id FROM ingredients WHERE name='Radish')),
+(2, (SELECT id FROM ingredients WHERE name='Kangkong'));
 
 -- Seed Inventory & Pricing Rules for each menu item
 INSERT INTO inventory (menu_item_id, walkin_pool_qty, online_pool_qty, critical_stock_threshold)

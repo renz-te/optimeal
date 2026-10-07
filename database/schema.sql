@@ -1,4 +1,5 @@
-CREATE DATABASE IF NOT EXISTS optimeal;
+DROP DATABASE IF EXISTS optimeal;
+CREATE DATABASE optimeal;
 USE optimeal;
 
 -- Users table
@@ -30,8 +31,38 @@ CREATE TABLE IF NOT EXISTS menu_items (
     price_floor DECIMAL(10, 2) NOT NULL,
     description TEXT,
     image_url VARCHAR(255),
+    calories INT DEFAULT NULL,
+    protein_g INT DEFAULT NULL,
+    carbs_g INT DEFAULT NULL,
+    fat_g INT DEFAULT NULL,
+    sodium_mg INT DEFAULT NULL,
+    ai_confirmed BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
+);
+
+-- Ingredients table
+CREATE TABLE IF NOT EXISTS ingredients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+
+-- Junction table for Ingredients
+CREATE TABLE IF NOT EXISTS menu_item_ingredients (
+    menu_item_id INT NOT NULL,
+    ingredient_id INT NOT NULL,
+    PRIMARY KEY (menu_item_id, ingredient_id),
+    FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
+);
+
+-- Ingredient to Allergen Mapping table
+CREATE TABLE IF NOT EXISTS ingredient_allergen_map (
+    ingredient_id INT NOT NULL,
+    allergen_id INT NOT NULL,
+    PRIMARY KEY (ingredient_id, allergen_id),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
+    FOREIGN KEY (allergen_id) REFERENCES critical_allergens(id) ON DELETE CASCADE
 );
 
 -- Critical Allergens table (immune-mediated, triggers blocking cart modal)
