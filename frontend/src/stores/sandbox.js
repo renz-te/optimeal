@@ -31,7 +31,7 @@ const getStoredMode = () => {
 
 const getStoredFlags = () => {
   const f = sessionStorage.getItem('sandbox_simulated_flags')
-  return f ? JSON.parse(f) : { allergens: [], sensitivities: [], dietary: [] }
+  return f ? JSON.parse(f) : { allergens: ['Peanuts'], sensitivities: [], dietary: [] }
 }
 
 export const activePreviewMode = ref(getStoredMode())

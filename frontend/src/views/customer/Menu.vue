@@ -99,14 +99,14 @@
           </div>
 
           <div class="mb-5 flex flex-wrap gap-1.5">
-            <span v-if="(!item.allergens || item.allergens.length === 0) && (!item.sensitivities || item.sensitivities.length === 0)" class="inline-flex items-center bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
+            <span v-if="(!item.critical_allergens?.length && !item.allergens?.length) && (!item.digestive_sensitivities?.length && !item.sensitivities?.length)" class="inline-flex items-center bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
               Safe / No Common Allergens
             </span>
             <template v-else>
-              <span v-for="a in item.allergens" :key="'c-'+a" class="inline-flex items-center bg-rose-50 text-rose-700 border border-rose-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
+              <span v-for="a in (item.critical_allergens || item.allergens || [])" :key="'c-'+a" class="inline-flex items-center bg-rose-50 text-rose-700 border border-rose-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
                 <AlertTriangle :size="14" class="text-rose-600 inline mr-1" /> {{ a }}
               </span>
-              <span v-for="s in item.sensitivities" :key="'s-'+s" class="inline-flex items-center bg-amber-50 text-amber-700 border border-amber-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
+              <span v-for="s in (item.digestive_sensitivities || item.sensitivities || [])" :key="'s-'+s" class="inline-flex items-center bg-amber-50 text-amber-700 border border-amber-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
                  {{ s }}
               </span>
             </template>
@@ -190,14 +190,14 @@
           <div>
             <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Dietary & Allergen Notice</label>
             <div class="flex flex-wrap gap-2">
-              <span v-if="(!selectedItem.allergens || selectedItem.allergens.length === 0) && (!selectedItem.sensitivities || selectedItem.sensitivities.length === 0)" class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold px-2.5 py-1 rounded-md flex items-center">
+              <span v-if="(!selectedItem.critical_allergens?.length && !selectedItem.allergens?.length) && (!selectedItem.digestive_sensitivities?.length && !selectedItem.sensitivities?.length)" class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold px-2.5 py-1 rounded-md flex items-center">
                 Safe / No Common Allergens
               </span>
               <template v-else>
-                <span v-for="a in selectedItem.allergens" :key="'c-'+a" class="bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold px-2.5 py-1 rounded-md flex items-center">
+                <span v-for="a in (selectedItem.critical_allergens || selectedItem.allergens || [])" :key="'c-'+a" class="bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold px-2.5 py-1 rounded-md flex items-center">
                   <AlertTriangle :size="14" class="text-rose-600 inline mr-1" /> {{ a }}
                 </span>
-                <span v-for="s in selectedItem.sensitivities" :key="'s-'+s" class="bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-md">
+                <span v-for="s in (selectedItem.digestive_sensitivities || selectedItem.sensitivities || [])" :key="'s-'+s" class="bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-md">
                    {{ s }}
                 </span>
               </template>
@@ -756,8 +756,11 @@ function getMatches(item) {
   const matched = [];
 
   // 1. Structured tag matching
-  (item.allergens || []).forEach(a => { if (userFlags.includes(a)) matched.push(a); });
-  (item.sensitivities || []).forEach(s => { if (userFlags.includes(s)) matched.push(s); });
+  const itemAllergens = item.critical_allergens || item.allergens || [];
+  itemAllergens.forEach(a => { if (userFlags.includes(a)) matched.push(a); });
+  
+  const itemSensitivities = item.digestive_sensitivities || item.sensitivities || [];
+  itemSensitivities.forEach(s => { if (userFlags.includes(s)) matched.push(s); });
 
   // Handle dietary boundary exclusions
   if (userFlags.includes('No Pork') && (item.dietary || []).includes('Pork')) matched.push('Pork');
