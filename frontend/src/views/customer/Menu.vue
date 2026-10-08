@@ -32,14 +32,28 @@
       <button @click="dismissedSoftWarning = true" class="text-yellow-500 hover:text-yellow-700"><X :size="20"/></button>
     </div>
 
-    <!-- Category Filters -->
-    <div class="flex overflow-x-auto pb-2 mb-6 gap-2 hide-scrollbar">
-      <button v-for="cat in categories" :key="cat"
-              @click="selectedCategory = cat"
-              class="px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-colors"
-              :class="selectedCategory === cat ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'">
-        {{ cat }}
-      </button>
+    <!-- Filters Area -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+      <!-- Category Filters -->
+      <div class="flex overflow-x-auto pb-2 gap-2 hide-scrollbar w-full sm:w-auto">
+        <button v-for="cat in categories" :key="cat"
+                @click="selectedCategory = cat"
+                class="px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-colors"
+                :class="selectedCategory === cat ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'">
+          {{ cat }}
+        </button>
+      </div>
+
+      <!-- Calorie Filter -->
+      <div class="flex items-center space-x-2 w-full sm:w-auto flex-shrink-0">
+        <label class="text-sm font-bold text-slate-700 whitespace-nowrap">Max Est. Calories:</label>
+        <div class="relative w-32">
+          <input type="number" v-model.number="maxCalories" placeholder="e.g. 500" class="w-full pl-3 pr-8 py-2 border border-slate-300 rounded-full outline-none focus:border-emerald-500 font-medium text-sm">
+          <button v-if="maxCalories" @click="maxCalories = null" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+            <X :size="14" />
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -573,6 +587,7 @@ watch(cart, (newItems) => {
 const dangerAcknowledged = ref(false)
 const categories = ['All', 'Sabaw / Soup', 'Ulam / Stews', 'Prito / Fried', 'Gulay & Veg', 'Dessert / Snacks']
 const selectedCategory = ref('All')
+const maxCalories = ref(null)
 const selectedItem = ref(null)
 const preference = ref('no_preference')
 const quantity = ref(1)
@@ -679,6 +694,14 @@ const displayDishes = computed(() => {
   let list = menuItems.value;
   if (selectedCategory.value && selectedCategory.value !== 'All') {
     list = list.filter(item => item.category === selectedCategory.value);
+  }
+  if (maxCalories.value && maxCalories.value > 0) {
+    list = list.filter(item => {
+      if (!item.macros || item.macros.calories === null || item.macros.calories === undefined) {
+        return false;
+      }
+      return item.macros.calories <= maxCalories.value;
+    });
   }
   return [...list].sort((a, b) => {
     const aConflicts = getMatches(a).length > 0;
