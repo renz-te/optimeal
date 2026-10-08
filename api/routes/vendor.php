@@ -119,7 +119,7 @@ function handleGetVendorOrders($pdo) {
 }
 
 function handleEnrichDish($pdo) {
-    $store_id = requireVendor($pdo);
+    $session = requireRole($pdo, ['vendor', 'admin']);
     
     // Parse incoming JSON payload
     $input = json_decode(file_get_contents('php://input'), true);
