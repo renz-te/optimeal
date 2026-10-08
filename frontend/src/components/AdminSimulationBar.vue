@@ -16,7 +16,7 @@
       <button 
         @click="setMode('admin', '/admin/dashboard')"
         class="px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center space-x-2"
-        :class="currentMode === 'admin' ? 'bg-indigo-500 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'"
+        :class="activePreviewMode === 'admin' ? 'bg-indigo-500 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'"
       >
         <LayoutDashboard :size="14" />
         <span>Admin Console</span>
@@ -24,7 +24,7 @@
       <button 
         @click="setMode('vendor', '/vendor/dashboard')"
         class="px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center space-x-2"
-        :class="currentMode === 'vendor' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'"
+        :class="activePreviewMode === 'vendor' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'"
       >
         <Store :size="14" />
         <span>Vendor Mode</span>
@@ -32,7 +32,7 @@
       <button 
         @click="setMode('customer', '/customer/menu')"
         class="px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center space-x-2"
-        :class="currentMode === 'customer' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'"
+        :class="activePreviewMode === 'customer' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-700'"
       >
         <User :size="14" />
         <span>Customer Mode</span>
@@ -41,7 +41,7 @@
 
     <!-- Right: Customer Preferences & Controls -->
     <div class="flex items-center space-x-3">
-      <template v-if="currentMode === 'customer'">
+      <template v-if="activePreviewMode === 'customer'">
         <div class="relative flex items-center border border-slate-700 rounded-lg bg-slate-800 px-2 py-1">
           <Filter :size="12" class="text-slate-400 mr-2" />
           <select v-model="activePreset" @change="applyPreset" class="bg-transparent text-xs font-bold text-slate-200 outline-none w-48 cursor-pointer">
@@ -74,7 +74,7 @@ import { useSandbox } from '../stores/sandbox'
 
 const router = useRouter()
 const route = useRoute()
-const { currentMode, sandboxFlags, resetSandboxState } = useSandbox()
+const { activePreviewMode, simulatedDietaryFlags, resetSandboxState } = useSandbox()
 
 const activePreset = ref('default')
 
@@ -89,21 +89,23 @@ const isAdmin = computed(() => {
 
 // Auto-sync mode based on current route if refreshed
 onMounted(() => {
-  if (route.path.includes('/admin')) currentMode.value = 'admin'
-  else if (route.path.includes('/vendor')) currentMode.value = 'vendor'
-  else if (route.path.includes('/customer')) currentMode.value = 'customer'
+  if (route.path.includes('/admin')) activePreviewMode.value = 'admin'
+  else if (route.path.includes('/vendor')) activePreviewMode.value = 'vendor'
+  else if (route.path.includes('/customer')) activePreviewMode.value = 'customer'
   
   matchPresetFromFlags()
 })
 
 const setMode = (mode, path) => {
-  currentMode.value = mode
+  activePreviewMode.value = mode
+  // Force sync immediately so Vue Router navigation guards allow the transition
+  sessionStorage.setItem('sandbox_preview_mode', mode)
   router.push(path)
 }
 
 const matchPresetFromFlags = () => {
-  const f = sandboxFlags.value
-  const has = (arr, val) => arr.includes(val)
+  const f = simulatedDietaryFlags.value
+  const has = (arr, val) => arr && arr.includes(val)
   
   if (has(f.allergens, 'Peanuts') && has(f.dietary, 'No Pork') && has(f.sensitivities, 'Spicy / Capsaicin')) {
     activePreset.value = 'juan'
@@ -111,7 +113,7 @@ const matchPresetFromFlags = () => {
     activePreset.value = 'seafood'
   } else if (has(f.dietary, 'Vegetarian / Plant-Based')) {
     activePreset.value = 'veg'
-  } else if (f.allergens.length === 0 && f.dietary.length === 0 && f.sensitivities.length === 0) {
+  } else if ((!f.allergens || f.allergens.length === 0) && (!f.dietary || f.dietary.length === 0) && (!f.sensitivities || f.sensitivities.length === 0)) {
     activePreset.value = 'default'
   } else {
     activePreset.value = 'custom' // Not explicitly in options, but keeps select valid
@@ -130,7 +132,7 @@ const applyPreset = () => {
     flags = { allergens: [], dietary: ['Vegetarian / Plant-Based'], sensitivities: [] }
   }
   
-  sandboxFlags.value = flags
+  simulatedDietaryFlags.value = flags
 }
 
 const handleReset = () => {
