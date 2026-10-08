@@ -15,7 +15,7 @@
           <router-link to="/admin/taxonomy" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <ListTree :size="18" /><span>Allergen Taxonomy</span>
           </router-link>
-        
+        </template>
         <template v-if="displayRole === 'vendor'">
           <router-link to="/vendor/orders" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <ListOrdered :size="18" /><span>Live Orders & Queue</span>

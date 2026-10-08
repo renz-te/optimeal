@@ -96,33 +96,7 @@ const handleSubmit = async () => {
 
   } catch (err) {
     console.error('API Error:', err)
-    
-    // SAFE FALLBACK for offline/local unseeded testing
-    if (err.message.includes('Failed to fetch') || err.message.includes('Authentication failed') || err.message.includes('Unexpected token')) {
-      if (isLogin.value) {
-        if (form.email === 'test@test.com' && form.password === 'password') {
-          loginUser('Test Customer (Mock)', 'customer')
-          return
-        }
-        if (form.email === 'canteen@optimeal.test' && form.password === 'password123') {
-          loginUser('Main Cafeteria Stall (Mock)', 'vendor')
-          return
-        }
-        if (form.email === 'student@optimeal.test' && form.password === 'password123') {
-          loginUser('Juan Dela Cruz (Mock)', 'student')
-          return
-        }
-        if (form.email === 'admin@optimeal.test' && form.password === 'password123') {
-          loginUser('System Administrator (Mock)', 'admin')
-          return
-        }
-        error.value = 'Invalid credentials. Try test@test.com / password for mock access.'
-      } else {
-        loginUser(form.name + ' (Mock)', 'customer')
-      }
-    } else {
-      error.value = err.message
-    }
+    error.value = err.message
   } finally {
     loading.value = false
   }
