@@ -19,24 +19,28 @@ function handleRegister($pdo) {
 }
 
 function handleLogin($pdo) {
-    $input = json_decode(file_get_contents('php://input'), true);
-    if (!isset($input['email'], $input['password'])) {
-        jsonResponse(['error' => 'Missing credentials'], 400);
-    }
-    
-    $stmt = $pdo->prepare("SELECT id, name, password_hash, role FROM users WHERE email = ?");
-    $stmt->execute([$input['email']]);
-    $user = $stmt->fetch();
-    
-    if ($user && password_verify($input['password'], $user['password_hash'])) {
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['role'] = $user['role'];
-        jsonResponse([
-            'message' => 'Logged in', 
-            'role' => $user['role'],
-            'name' => $user['name']
-        ]);
-    } else {
-        jsonResponse(['error' => 'Invalid credentials'], 401);
+    try {
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!isset($input['email'], $input['password'])) {
+            jsonResponse(['error' => 'Missing credentials'], 400);
+        }
+        
+        $stmt = $pdo->prepare("SELECT id, name, password_hash, role FROM users WHERE email = ?");
+        $stmt->execute([$input['email']]);
+        $user = $stmt->fetch();
+        
+        if ($user && password_verify($input['password'], $user['password_hash'])) {
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['role'] = $user['role'];
+            jsonResponse([
+                'message' => 'Logged in', 
+                'role' => $user['role'],
+                'name' => $user['name']
+            ]);
+        } else {
+            jsonResponse(['error' => 'Invalid credentials'], 401);
+        }
+    } catch (Exception $e) {
+        jsonResponse(['error' => $e->getMessage()], 500);
     }
 }
