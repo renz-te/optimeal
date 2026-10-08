@@ -88,11 +88,11 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 -- Seed Users
 INSERT INTO users (name, email, password_hash, role) VALUES 
-('Admin User', 'admin@optimeal.local', 'hashed_pwd_placeholder', 'admin'),
-('Vendor Alice', 'vendor1@optimeal.local', 'hashed_pwd_placeholder', 'vendor'),
-('Vendor Bob', 'vendor2@optimeal.local', 'hashed_pwd_placeholder', 'vendor'),
-('Student Charlie', 'student1@optimeal.local', 'hashed_pwd_placeholder', 'student'),
-('Student Diana', 'student2@optimeal.local', 'hashed_pwd_placeholder', 'student');
+('Admin User', 'admin@optimeal.local', '$2y$10$yX3wkm0yHFxcP8eIdviQ/OTjjty3..j2kkmaIkroSyjjYxsuMZhcy', 'admin'),
+('Vendor Alice', 'vendor1@optimeal.local', '$2y$10$yX3wkm0yHFxcP8eIdviQ/OTjjty3..j2kkmaIkroSyjjYxsuMZhcy', 'vendor'),
+('Vendor Bob', 'vendor2@optimeal.local', '$2y$10$yX3wkm0yHFxcP8eIdviQ/OTjjty3..j2kkmaIkroSyjjYxsuMZhcy', 'vendor'),
+('Student Charlie', 'student1@optimeal.local', '$2y$10$yX3wkm0yHFxcP8eIdviQ/OTjjty3..j2kkmaIkroSyjjYxsuMZhcy', 'student'),
+('Student Diana', 'student2@optimeal.local', '$2y$10$yX3wkm0yHFxcP8eIdviQ/OTjjty3..j2kkmaIkroSyjjYxsuMZhcy', 'student');
 
 -- Seed Stores
 INSERT INTO stores (vendor_user_id, name, description) VALUES 

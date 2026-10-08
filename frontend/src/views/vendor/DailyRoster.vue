@@ -419,7 +419,7 @@ const saveDish = async () => {
   }
 
   try {
-    const res = await fetch('/optimeal/api/vendor/dish', {
+    const res = await fetch('/api/vendor/dish', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

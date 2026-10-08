@@ -39,6 +39,12 @@ foreach ($users as $user) {
         // Assuming table 'users' has name, email, password_hash, role
         $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)");
         $stmt->execute([$user['name'], $user['email'], $user['password'], $user['role']]);
+        $userId = $pdo->lastInsertId();
+        
+        if ($user['role'] === 'vendor') {
+            $stmtStore = $pdo->prepare("INSERT IGNORE INTO stores (vendor_user_id, name) VALUES (?, ?)");
+            $stmtStore->execute([$userId, $user['name'] . ' Store']);
+        }
         echo "Inserted {$user['email']}\n";
     }
 }
