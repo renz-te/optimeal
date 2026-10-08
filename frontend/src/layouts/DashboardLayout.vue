@@ -1,5 +1,6 @@
 <template>
   <div class="flex h-screen bg-slate-100 font-sans antialiased text-slate-900 overflow-hidden">
+    <AdminSimulationBar />
     <!-- Desktop Sidebar -->
     <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full flex-shrink-0 relative z-20 shadow-xl">
       <div class="p-6">
@@ -62,6 +63,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { LayoutDashboard, Store, Tags, ListTree, Users, ListOrdered, Utensils, LineChart, LogOut } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
+import AdminSimulationBar from '../components/AdminSimulationBar.vue'
 
 const router = useRouter()
 const { activePreviewMode, clearSandbox } = useSandbox()
