@@ -244,7 +244,7 @@ import { useSandbox } from '../../stores/sandbox'
 import { useTaxonomy } from '../../stores/taxonomy'
 
 const router = useRouter()
-const { masterCatalog, addDish, updateDish } = useCatalog()
+const { masterCatalog } = useCatalog()
 const { sandboxMenu } = useSandbox()
 const { masterTaxonomy, addTag } = useTaxonomy()
 
@@ -400,27 +400,36 @@ const addNewAllergen = () => {
   }
 }
 
-const saveDish = () => {
+const saveDish = async () => {
   if (formData.macros.calories !== null && formData.macros.calories !== '' && !formData.ai_confirmed) {
     showToast('Please review and confirm the ingredients and macros before saving.', 'error')
     return
   }
 
-  const ingredients = formData.ingredientsString.split(',').map(s => s.trim()).filter(Boolean)
-  
-  if (editItem.value) {
-    updateDish(editItem.value.id, {
-      name: formData.name,
-      description: formData.description,
-      category: formData.category,
-      base_price: formData.base_price,
-      ingredients,
-      allergens: [...formData.allergens],
-      dietary: [...formData.dietary],
-      sensitivities: [...formData.sensitivities]
+  const payload = {
+    id: editItem.value ? editItem.value.id : null,
+    name: formData.name,
+    description: formData.description,
+    category: formData.category,
+    base_price: formData.base_price,
+    ingredientsString: formData.ingredientsString,
+    macros: formData.macros,
+    ai_confirmed: formData.ai_confirmed,
+    portion: formData.portion
+  }
+
+  try {
+    const res = await fetch('/optimeal/api/vendor/dish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     })
-  } else {
-    const newDish = {
+    
+    if (!res.ok) throw new Error('Failed to save dish')
+    const data = await res.json()
+    
+    const ingredients = formData.ingredientsString.split(',').map(s => s.trim()).filter(Boolean)
+    const dishData = {
       name: formData.name,
       description: formData.description,
       category: formData.category,
@@ -429,25 +438,31 @@ const saveDish = () => {
       allergens: [...formData.allergens],
       dietary: [...formData.dietary],
       sensitivities: [...formData.sensitivities],
+      macros: formData.macros,
       ai_confirmed: formData.ai_confirmed,
-      decay: 30 // default decay
+      decay: 30
     }
-    
-    if (formData.saveToCatalog) {
-      addDish(newDish)
+
+    if (editItem.value) {
+      const idx = masterCatalog.value.findIndex(d => d.id === editItem.value.id)
+      if (idx !== -1) masterCatalog.value[idx] = { ...masterCatalog.value[idx], ...dishData }
     } else {
-      // Just add directly to roster as temporary
-      const id = Date.now()
-      activeRoster.value.unshift({
-        ...newDish,
-        id,
-        selected: true,
-        stock: 10,
-        current_price: newDish.base_price
-      })
+      if (formData.saveToCatalog) {
+        masterCatalog.value.push({ ...dishData, id: data.id })
+      } else {
+        activeRoster.value.unshift({
+          ...dishData,
+          id: data.id,
+          selected: true,
+          stock: 10,
+          current_price: dishData.base_price
+        })
+      }
     }
+    closeModal()
+  } catch (err) {
+    showToast('Failed to save dish to backend.', 'error')
   }
-  closeModal()
 }
 
 const launchMenu = () => {
