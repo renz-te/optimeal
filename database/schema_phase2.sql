@@ -101,7 +101,7 @@ INSERT INTO stores (vendor_user_id, name, description) VALUES
 
 -- Seed Allergens & Sensitivities
 INSERT INTO critical_allergens (name) VALUES 
-('Peanuts'), ('Shellfish'), ('Eggs'), ('Dairy'), ('Tree Nuts'), ('Soy');
+('Peanuts'), ('Shellfish / Crustaceans'), ('Shrimp Paste (Bagoong)'), ('Eggs'), ('Dairy'), ('Tree Nuts'), ('Soy'), ('Fish'), ('Wheat/Gluten'), ('Sesame');
 
 INSERT INTO digestive_sensitivities (name) VALUES 
 ('Coconut Milk/Gata'), ('Hot Pepper/Capsaicin'), ('Garlic'), ('Onion');
@@ -146,20 +146,44 @@ INSERT INTO menu_item_digestive_sensitivities (menu_item_id, sensitivity_id) VAL
 
 -- 8: Buttered Shrimp (Shellfish, Dairy)
 INSERT INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES 
-(8, (SELECT id FROM critical_allergens WHERE name='Shellfish')),
+(8, (SELECT id FROM critical_allergens WHERE name='Shellfish / Crustaceans')),
 (8, (SELECT id FROM critical_allergens WHERE name='Dairy'));
 
 -- Seed Ingredients & Mappings
 INSERT INTO ingredients (name) VALUES 
 ('Chicken Thigh'), ('Soy Sauce'), ('Cane Vinegar'), ('Garlic'),
 ('Pork Ribs'), ('Tamarind Broth'), ('Radish'), ('Kangkong'),
-('Shrimp Paste'), ('Peanut Butter'), ('Egg Noodles');
+('Shrimp Paste'), ('Peanut Butter'), ('Egg Noodles'),
+('Shrimp'), ('Eggs'), ('Milk'), ('Peanuts'), ('Tofu'), ('Crab'), ('Squid'), ('Clams'), 
+('Cheese'), ('Butter'), ('Condensed Milk'), ('Evaporated Milk'), ('Flour'), ('Bread'), 
+('Pasta'), ('Sesame Oil'), ('Sesame Seeds'), ('Fish Sauce'), ('Bangus'), ('Tilapia'), 
+('Pork'), ('Beef'), ('Chicken'), ('Coconut Milk'), ('Onion'), ('Sugar'), ('Salt');
 
 INSERT INTO ingredient_allergen_map (ingredient_id, allergen_id) VALUES 
 ((SELECT id FROM ingredients WHERE name='Soy Sauce'), (SELECT id FROM critical_allergens WHERE name='Soy')),
-((SELECT id FROM ingredients WHERE name='Shrimp Paste'), (SELECT id FROM critical_allergens WHERE name='Shellfish')),
+((SELECT id FROM ingredients WHERE name='Tofu'), (SELECT id FROM critical_allergens WHERE name='Soy')),
+((SELECT id FROM ingredients WHERE name='Shrimp Paste'), (SELECT id FROM critical_allergens WHERE name='Shrimp Paste (Bagoong)')),
+((SELECT id FROM ingredients WHERE name='Shrimp'), (SELECT id FROM critical_allergens WHERE name='Shellfish / Crustaceans')),
+((SELECT id FROM ingredients WHERE name='Crab'), (SELECT id FROM critical_allergens WHERE name='Shellfish / Crustaceans')),
+((SELECT id FROM ingredients WHERE name='Squid'), (SELECT id FROM critical_allergens WHERE name='Shellfish / Crustaceans')),
+((SELECT id FROM ingredients WHERE name='Clams'), (SELECT id FROM critical_allergens WHERE name='Shellfish / Crustaceans')),
 ((SELECT id FROM ingredients WHERE name='Peanut Butter'), (SELECT id FROM critical_allergens WHERE name='Peanuts')),
-((SELECT id FROM ingredients WHERE name='Egg Noodles'), (SELECT id FROM critical_allergens WHERE name='Eggs'));
+((SELECT id FROM ingredients WHERE name='Peanuts'), (SELECT id FROM critical_allergens WHERE name='Peanuts')),
+((SELECT id FROM ingredients WHERE name='Egg Noodles'), (SELECT id FROM critical_allergens WHERE name='Eggs')),
+((SELECT id FROM ingredients WHERE name='Eggs'), (SELECT id FROM critical_allergens WHERE name='Eggs')),
+((SELECT id FROM ingredients WHERE name='Milk'), (SELECT id FROM critical_allergens WHERE name='Dairy')),
+((SELECT id FROM ingredients WHERE name='Cheese'), (SELECT id FROM critical_allergens WHERE name='Dairy')),
+((SELECT id FROM ingredients WHERE name='Butter'), (SELECT id FROM critical_allergens WHERE name='Dairy')),
+((SELECT id FROM ingredients WHERE name='Condensed Milk'), (SELECT id FROM critical_allergens WHERE name='Dairy')),
+((SELECT id FROM ingredients WHERE name='Evaporated Milk'), (SELECT id FROM critical_allergens WHERE name='Dairy')),
+((SELECT id FROM ingredients WHERE name='Flour'), (SELECT id FROM critical_allergens WHERE name='Wheat/Gluten')),
+((SELECT id FROM ingredients WHERE name='Bread'), (SELECT id FROM critical_allergens WHERE name='Wheat/Gluten')),
+((SELECT id FROM ingredients WHERE name='Pasta'), (SELECT id FROM critical_allergens WHERE name='Wheat/Gluten')),
+((SELECT id FROM ingredients WHERE name='Sesame Oil'), (SELECT id FROM critical_allergens WHERE name='Sesame')),
+((SELECT id FROM ingredients WHERE name='Sesame Seeds'), (SELECT id FROM critical_allergens WHERE name='Sesame')),
+((SELECT id FROM ingredients WHERE name='Fish Sauce'), (SELECT id FROM critical_allergens WHERE name='Fish')),
+((SELECT id FROM ingredients WHERE name='Bangus'), (SELECT id FROM critical_allergens WHERE name='Fish')),
+((SELECT id FROM ingredients WHERE name='Tilapia'), (SELECT id FROM critical_allergens WHERE name='Fish'));
 
 INSERT INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES 
 (1, (SELECT id FROM ingredients WHERE name='Chicken Thigh')),
