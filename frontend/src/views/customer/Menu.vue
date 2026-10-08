@@ -66,8 +66,22 @@
 
         <div class="p-5 flex-1 flex flex-col">
           <h3 class="text-lg font-semibold text-slate-900 mb-1">{{ item.name }}</h3>
-          <p class="text-sm text-slate-600 mb-4 flex-1">{{ item.description }}</p>
+          <p class="text-sm text-slate-600 mb-3">{{ item.description }}</p>
           
+          <div v-if="item.macros && item.macros.calories" class="mb-2">
+            <div class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded inline-block border border-slate-200">
+              Est. {{ item.macros.calories }} kcal • {{ item.macros.protein_g }}g Pro • {{ item.macros.carbs_g }}g Carbs • {{ item.macros.fat_g }}g Fat • {{ item.macros.sodium_mg }}mg Sod
+            </div>
+          </div>
+          
+          <div v-if="item.ingredients && item.ingredients.length" class="mb-3">
+            <p class="text-[11px] text-slate-500 line-clamp-2 leading-snug">
+              <span class="font-semibold text-slate-700">Ingredients:</span> {{ item.ingredients.join(', ') }}
+            </p>
+          </div>
+          
+          <div class="flex-1"></div>
+
           <div class="flex items-end space-x-2 mb-4">
             <span class="text-3xl font-semibold tabular-nums text-slate-900">₱{{ item.current_price.toFixed(2) }}</span>
             <span v-if="isClearance(item)" class="text-sm font-semibold tabular-nums line-through text-slate-400 mb-1">₱{{ item.base_price }}</span>
@@ -138,9 +152,37 @@
           <div>
             <label class="block text-sm font-bold text-slate-800 mb-3">Dish Ingredients</label>
             <div class="flex flex-wrap gap-2">
-              <span v-for="ing in (selectedItem.ingredients || [])" :key="'ing-'+ing" class="bg-slate-100 text-slate-700 text-xs px-2.5 py-1 rounded-md">
+              <span v-for="ing in (selectedItem.ingredients || [])" :key="'ing-'+ing" class="bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold px-2.5 py-1 rounded-md">
                 {{ ing }}
               </span>
+              <span v-if="!selectedItem.ingredients || selectedItem.ingredients.length === 0" class="text-slate-500 text-sm italic">Not specified</span>
+            </div>
+          </div>
+          
+          <!-- Macros -->
+          <div v-if="selectedItem.macros && selectedItem.macros.calories">
+            <label class="block text-sm font-bold text-slate-800 mb-2">Estimated Macros</label>
+            <div class="grid grid-cols-5 gap-2 text-center">
+              <div class="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                <div class="text-[9px] uppercase text-slate-500 font-bold mb-0.5 tracking-wider">Calories</div>
+                <div class="text-xs font-black text-slate-900">{{ selectedItem.macros.calories }}</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                <div class="text-[9px] uppercase text-slate-500 font-bold mb-0.5 tracking-wider">Protein</div>
+                <div class="text-xs font-black text-slate-900">{{ selectedItem.macros.protein_g }}g</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                <div class="text-[9px] uppercase text-slate-500 font-bold mb-0.5 tracking-wider">Carbs</div>
+                <div class="text-xs font-black text-slate-900">{{ selectedItem.macros.carbs_g }}g</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                <div class="text-[9px] uppercase text-slate-500 font-bold mb-0.5 tracking-wider">Fat</div>
+                <div class="text-xs font-black text-slate-900">{{ selectedItem.macros.fat_g }}g</div>
+              </div>
+              <div class="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                <div class="text-[9px] uppercase text-slate-500 font-bold mb-0.5 tracking-wider">Sodium</div>
+                <div class="text-xs font-black text-slate-900">{{ selectedItem.macros.sodium_mg }}mg</div>
+              </div>
             </div>
           </div>
           
