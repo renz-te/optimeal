@@ -121,6 +121,8 @@ function handleGetVendorOrders($pdo) {
 }
 
 function handleEnrichDish($pdo) {
+    $store_id = requireVendor($pdo);
+    
     // Parse incoming JSON payload
     $input = json_decode(file_get_contents('php://input'), true);
 
@@ -223,6 +225,11 @@ function handleSaveDish($pdo) {
     $fat_g = isset($input['macros']['fat_g']) ? $input['macros']['fat_g'] : null;
     $sodium_mg = isset($input['macros']['sodium_mg']) ? $input['macros']['sodium_mg'] : null;
     $ai_confirmed = !empty($input['ai_confirmed']) ? 1 : 0;
+    
+    // Server-side confirmation validation
+    if ($calories !== null && $calories !== '' && !$ai_confirmed) {
+        jsonResponse(['error' => 'AI-estimated macros must be explicitly confirmed by the vendor'], 400);
+    }
     
     if ($dishId) {
         $stmt = $pdo->prepare("
