@@ -294,5 +294,17 @@ function handleSaveDish($pdo) {
         }
     }
     
-    jsonResponse(['message' => 'Dish saved', 'id' => $dishId]);
+    $mappedAllergenNames = [];
+    if ($dishId) {
+        $stmt = $pdo->prepare("
+            SELECT ca.name 
+            FROM menu_item_critical_allergens mica
+            JOIN critical_allergens ca ON mica.allergen_id = ca.id
+            WHERE mica.menu_item_id = ?
+        ");
+        $stmt->execute([$dishId]);
+        $mappedAllergenNames = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+    
+    jsonResponse(['message' => 'Dish saved', 'id' => $dishId, 'mapped_allergens' => $mappedAllergenNames]);
 }

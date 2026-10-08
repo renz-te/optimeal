@@ -418,6 +418,10 @@ const saveDish = async () => {
     portion: formData.portion
   }
 
+  let finalAllergens = [...formData.allergens]
+  let returnedId = null
+  let isOffline = false
+
   try {
     const res = await fetch('/api/vendor/dish', {
       method: 'POST',
@@ -427,41 +431,52 @@ const saveDish = async () => {
     
     if (!res.ok) throw new Error('Failed to save dish')
     const data = await res.json()
+    returnedId = data.id
     
-    const ingredients = formData.ingredientsString.split(',').map(s => s.trim()).filter(Boolean)
-    const dishData = {
-      name: formData.name,
-      description: formData.description,
-      category: formData.category,
-      base_price: formData.base_price,
-      ingredients,
-      allergens: [...formData.allergens],
-      dietary: [...formData.dietary],
-      sensitivities: [...formData.sensitivities],
-      macros: formData.macros,
-      ai_confirmed: formData.ai_confirmed,
-      decay: 30
+    if (data.mapped_allergens && data.mapped_allergens.length > 0) {
+      finalAllergens = [...new Set([...finalAllergens, ...data.mapped_allergens])]
     }
-
-    if (editItem.value) {
-      const idx = masterCatalog.value.findIndex(d => d.id === editItem.value.id)
-      if (idx !== -1) masterCatalog.value[idx] = { ...masterCatalog.value[idx], ...dishData }
-    } else {
-      if (formData.saveToCatalog) {
-        masterCatalog.value.push({ ...dishData, id: data.id })
-      } else {
-        activeRoster.value.unshift({
-          ...dishData,
-          id: data.id,
-          selected: true,
-          stock: 10,
-          current_price: dishData.base_price
-        })
-      }
-    }
-    closeModal()
   } catch (err) {
-    showToast('Failed to save dish to backend.', 'error')
+    isOffline = true
+  }
+
+  const ingredients = formData.ingredientsString.split(',').map(s => s.trim()).filter(Boolean)
+  const dishData = {
+    name: formData.name,
+    description: formData.description,
+    category: formData.category,
+    base_price: formData.base_price,
+    ingredients,
+    allergens: finalAllergens,
+    dietary: [...formData.dietary],
+    sensitivities: [...formData.sensitivities],
+    macros: formData.macros,
+    ai_confirmed: formData.ai_confirmed,
+    decay: 30
+  }
+
+  if (editItem.value) {
+    const idx = masterCatalog.value.findIndex(d => d.id === editItem.value.id)
+    if (idx !== -1) masterCatalog.value[idx] = { ...masterCatalog.value[idx], ...dishData }
+  } else {
+    const idToUse = returnedId || Date.now()
+    if (formData.saveToCatalog) {
+      masterCatalog.value.push({ ...dishData, id: idToUse })
+    } else {
+      activeRoster.value.unshift({
+        ...dishData,
+        id: idToUse,
+        selected: true,
+        stock: 10,
+        current_price: dishData.base_price
+      })
+    }
+  }
+
+  closeModal()
+  
+  if (isOffline) {
+    showToast('Backend unreachable. Dish saved locally (Offline Mode).', 'error')
   }
 }
 
