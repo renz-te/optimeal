@@ -1,8 +1,6 @@
 <?php
 function requireVendor($pdo) {
-    if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'vendor') {
-        jsonResponse(['error' => 'Unauthorized. Vendor access required.'], 403);
-    }
+    $session = requireRole($pdo, ['vendor']);
     
     // Resolve vendor's store
     $stmt = $pdo->prepare("SELECT id FROM stores WHERE vendor_user_id = ?");

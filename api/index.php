@@ -24,6 +24,17 @@ function jsonResponse($data, $status = 200) {
     exit;
 }
 
+function requireRole($pdo, array $allowedRoles) {
+    if (session_status() === PHP_SESSION_NONE) { session_start(); }
+    if (empty($_SESSION['user_id']) || empty($_SESSION['role'])) {
+        jsonResponse(['error' => 'Unauthorized. Login required.'], 401);
+    }
+    if (!in_array($_SESSION['role'], $allowedRoles)) {
+        jsonResponse(['error' => 'Forbidden. Insufficient permissions.'], 403);
+    }
+    return $_SESSION;
+}
+
 // Simple Router Pattern
 if ($route === '/auth/register' && $method === 'POST') {
     require 'routes/auth.php';

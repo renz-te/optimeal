@@ -1,9 +1,7 @@
 <?php
-function requireCustomer() {
-    if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'customer') {
-        jsonResponse(['error' => 'Unauthorized. Customer access required.'], 403);
-    }
-    return $_SESSION['user_id'];
+function requireCustomer($pdo) {
+    $session = requireRole($pdo, ['student', 'customer']);
+    return $session['user_id'];
 }
 
 function handleGetMenu($pdo) {
@@ -83,7 +81,7 @@ function handleGetMenu($pdo) {
 }
 
 function handleCreateReservation($pdo) {
-    $user_id = requireCustomer();
+    $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
     
     // Expects: { "store_id": 1, "items": [ {"menu_item_id": 1, "quantity": 1, "portion_preference": "lean_meat", "ack": true} ] }
@@ -179,7 +177,7 @@ function handleCreateReservation($pdo) {
 }
 
 function handlePayReservation($pdo, $order_id) {
-    $user_id = requireCustomer();
+    $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
     $method = $input['method'] ?? 'e-wallet';
 
@@ -215,7 +213,7 @@ function handlePayReservation($pdo, $order_id) {
 }
 
 function handleGetCustomerOrders($pdo) {
-    $user_id = requireCustomer();
+    $user_id = requireCustomer($pdo);
     
     $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
     $stmt->execute([$user_id]);

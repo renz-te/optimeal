@@ -1,15 +1,17 @@
 <?php
 function handleRegister($pdo) {
     $input = json_decode(file_get_contents('php://input'), true);
-    if (!isset($input['name'], $input['email'], $input['password'], $input['role'])) {
+    if (!isset($input['name'], $input['email'], $input['password'])) {
         jsonResponse(['error' => 'Missing fields'], 400);
     }
     
+    // Force role to student for public registration to prevent privilege escalation
+    $role = 'student';
     $hash = password_hash($input['password'], PASSWORD_DEFAULT);
     
     $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)");
     try {
-        $stmt->execute([$input['name'], $input['email'], $hash, $input['role']]);
+        $stmt->execute([$input['name'], $input['email'], $hash, $role]);
         jsonResponse(['message' => 'User registered', 'id' => $pdo->lastInsertId()]);
     } catch (PDOException $e) {
         jsonResponse(['error' => 'Email already exists or invalid data'], 400);
