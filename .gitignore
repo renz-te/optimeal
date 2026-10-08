@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-ssr/
 .env
+api/.env
 .env.*
 *.local
 .DS_Store

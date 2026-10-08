@@ -134,8 +134,8 @@ function handleEnrichDish($pdo) {
         jsonResponse(['error' => 'Server configuration error: Missing API Key'], 500);
     }
 
-    $dishName = $input['name'];
-    $normalizedDishName = strtolower(trim($dishName));
+    $dishName = htmlspecialchars(trim($input['name']));
+    $normalizedDishName = strtolower($dishName);
 
     $cacheStmt = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name = ?");
     $cacheStmt->execute([$normalizedDishName]);
@@ -147,8 +147,8 @@ function handleEnrichDish($pdo) {
         }
     }
 
-    $description = isset($input['description']) ? $input['description'] : '';
-    $portion = isset($input['portion']) ? $input['portion'] : '';
+    $description = isset($input['description']) ? htmlspecialchars(trim($input['description'])) : '';
+    $portion = isset($input['portion']) ? htmlspecialchars(trim($input['portion'])) : '';
 
     $systemInstruction = "You are a culinary data assistant. You MUST respond with ONLY raw JSON. Do NOT wrap the JSON in markdown code blocks. Return an object with two keys: 'ingredients' (an array of strings listing all primary cooked ingredients) and 'macros' (an object with integer keys: calories, protein_g, carbs_g, fat_g, sodium_mg). CRITICAL RULE: List all actual ingredients accurately, including common allergen foods (e.g., list 'Peanut Butter', 'Shrimp', 'Egg Noodles', 'Soy Sauce' if used in the dish). Do NOT output any allergen keys, allergen tags, or safety disclaimers. Output ingredients and macros only.";
     
@@ -232,8 +232,8 @@ function handleSaveDish($pdo) {
             WHERE id = ? AND store_id = ?
         ");
         $stmt->execute([
-            $input['name'], 
-            isset($input['description']) ? $input['description'] : null,
+            htmlspecialchars(trim($input['name'])), 
+            isset($input['description']) ? htmlspecialchars(trim($input['description'])) : null,
             $input['base_price'],
             isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
             isset($input['image_url']) ? $input['image_url'] : null,
@@ -250,8 +250,8 @@ function handleSaveDish($pdo) {
         ");
         $stmt->execute([
             $store_id,
-            $input['name'],
-            isset($input['description']) ? $input['description'] : null,
+            htmlspecialchars(trim($input['name'])),
+            isset($input['description']) ? htmlspecialchars(trim($input['description'])) : null,
             $input['base_price'],
             isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
             isset($input['image_url']) ? $input['image_url'] : null,
