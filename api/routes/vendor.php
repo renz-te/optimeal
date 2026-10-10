@@ -104,18 +104,97 @@ function handlePostInventory($pdo) {
     jsonResponse(['message' => 'Inventory updated']);
 }
 
-function handleGetVendorOrders($pdo) {
+function handleGetOrders($pdo) {
     $store_id = requireVendor($pdo);
     
     $stmt = $pdo->prepare("
-        SELECT id, user_id, status, total_amount, claim_token, 
-        CASE WHEN status = 'claimed' THEN 1 ELSE 0 END as express_pickup_shelf
-        FROM orders 
-        WHERE store_id = ? AND status IN ('paid', 'claimed')
-        ORDER BY id ASC
+        SELECT o.id, o.user_id, o.status, o.total_amount, o.claim_token, o.reserved_at,
+               u.name as customer_name
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.store_id = ? AND o.status IN ('reserved', 'paid', 'claimed')
+        ORDER BY o.id ASC
     ");
     $stmt->execute([$store_id]);
-    jsonResponse($stmt->fetchAll());
+    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Fetch order items
+    $orderIds = array_column($orders, 'id');
+    if (!empty($orderIds)) {
+        $inQuery = implode(',', array_fill(0, count($orderIds), '?'));
+        $itemStmt = $pdo->prepare("
+            SELECT oi.order_id, oi.menu_item_id, oi.quantity, oi.portion_preference, m.name as item_name
+            FROM order_items oi
+            JOIN menu_items m ON oi.menu_item_id = m.id
+            WHERE oi.order_id IN ($inQuery)
+        ");
+        $itemStmt->execute($orderIds);
+        $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $itemsByOrder = [];
+        foreach ($items as $item) {
+            $itemsByOrder[$item['order_id']][] = $item;
+        }
+        
+        foreach ($orders as &$order) {
+            $order['items'] = $itemsByOrder[$order['id']] ?? [];
+        }
+    }
+    
+    jsonResponse($orders);
+}
+
+function handleUpdateOrderStatus($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (empty($input['order_id']) || empty($input['status'])) {
+        jsonResponse(['error' => 'Missing order_id or status'], 400);
+    }
+    
+    $order_id = $input['order_id'];
+    $status = $input['status'];
+
+    if (!in_array($status, ['claimed', 'completed', 'cancelled'])) {
+        jsonResponse(['error' => 'Invalid status'], 400);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $checkStmt = $pdo->prepare("SELECT id, status FROM orders WHERE id = ? AND store_id = ? FOR UPDATE");
+        $checkStmt->execute([$order_id, $store_id]);
+        $order = $checkStmt->fetch();
+
+        if (!$order) {
+            throw new Exception("Order not found or does not belong to your store.");
+        }
+        
+        // Prevent changing status if already cancelled or completed
+        if (in_array($order['status'], ['cancelled', 'completed'])) {
+            throw new Exception("Cannot change status of a " . $order['status'] . " order.");
+        }
+
+        $updateStmt = $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?");
+        $updateStmt->execute([$status, $order_id]);
+
+        if ($status === 'cancelled') {
+            $itemStmt = $pdo->prepare("SELECT menu_item_id, quantity FROM order_items WHERE order_id = ?");
+            $itemStmt->execute([$order_id]);
+            $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $restoreStmt = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty + ? WHERE menu_item_id = ?");
+            foreach ($items as $item) {
+                $restoreStmt->execute([$item['quantity'], $item['menu_item_id']]);
+            }
+        }
+
+        $pdo->commit();
+        jsonResponse(['message' => 'Order status updated successfully']);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        jsonResponse(['error' => $e->getMessage()], 400);
+    }
 }
 
 function handleEnrichDish($pdo) {

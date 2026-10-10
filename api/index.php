@@ -70,7 +70,10 @@ if ($route === '/auth/register' && $method === 'POST') {
     handlePostInventory($pdo);
 } elseif ($route === '/vendor/orders' && $method === 'GET') {
     require 'routes/vendor.php';
-    handleGetVendorOrders($pdo);
+    handleGetOrders($pdo);
+} elseif ($route === '/vendor/orders/update' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleUpdateOrderStatus($pdo);
 } elseif ($route === '/vendor/enrich-dish' && $method === 'POST') {
     require 'routes/vendor.php';
     handleEnrichDish($pdo);
