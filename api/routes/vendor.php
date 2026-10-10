@@ -336,3 +336,47 @@ function handleSaveDish($pdo) {
         jsonResponse(['error' => 'Failed to save dish: ' . $e->getMessage()], 500);
     }
 }
+
+function handleLaunchMenu($pdo) {
+    $session = requireRole($pdo, ['vendor', 'admin']);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (empty($input['store_id'])) {
+        jsonResponse(['error' => 'Missing store_id'], 400);
+    }
+    $store_id = $input['store_id'];
+
+    if (!isset($input['items']) || !is_array($input['items'])) {
+        jsonResponse(['error' => 'Missing or invalid items array'], 400);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        // Reset all dishes for this store to inactive
+        $stmtReset = $pdo->prepare("UPDATE menu_items SET is_active = 0 WHERE store_id = ?");
+        $stmtReset->execute([$store_id]);
+
+        $stmtActivate = $pdo->prepare("UPDATE menu_items SET is_active = 1 WHERE id = ? AND store_id = ?");
+        $stmtUpdateStock = $pdo->prepare("UPDATE inventory SET online_pool_qty = ?, delisted_from_app = 0 WHERE menu_item_id = ?");
+
+        foreach ($input['items'] as $item) {
+            if (!isset($item['menu_item_id'], $item['stock'])) {
+                continue;
+            }
+            
+            $stmtActivate->execute([$item['menu_item_id'], $store_id]);
+            
+            if ($stmtActivate->rowCount() > 0) {
+                // Ensure inventory updates only if the item genuinely belongs to the store
+                $stmtUpdateStock->execute([$item['stock'], $item['menu_item_id']]);
+            }
+        }
+
+        $pdo->commit();
+        jsonResponse(['message' => 'Menu launched successfully']);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        jsonResponse(['error' => 'Failed to launch menu: ' . $e->getMessage()], 500);
+    }
+}
