@@ -12,6 +12,7 @@ function handleGetMenu($pdo) {
 
     $stmt = $pdo->prepare("
         SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url,
+               m.category, m.dietary, m.ai_confirmed, m.calories, m.protein_g, m.carbs_g, m.fat_g, m.sodium_mg,
                i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
                pr.rush_hour_end_time, pr.decay_start_offset_minutes, pr.decay_rate_percent, 
                pr.decay_interval_minutes, pr.min_stock_to_trigger_decay
@@ -55,16 +56,54 @@ function handleGetMenu($pdo) {
         ");
         $sstmt->execute([$item['id']]);
         $digestive_sensitivities = $sstmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // 3. Fetch ingredients
+        $istmt = $pdo->prepare("
+            SELECT i.name 
+            FROM menu_item_ingredients mii
+            JOIN ingredients i ON mii.ingredient_id = i.id
+            WHERE mii.menu_item_id = ?
+        ");
+        $istmt->execute([$item['id']]);
+        $ingredients = $istmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Parse dietary JSON
+        $dietary = [];
+        if (!empty($item['dietary'])) {
+            $parsed = json_decode($item['dietary'], true);
+            if (is_array($parsed)) {
+                $dietary = $parsed;
+            }
+        }
+        
+        // Conditionally include macros
+        $macros = null;
+        if (!empty($item['ai_confirmed'])) {
+            $macros = [
+                'calories' => $item['calories'],
+                'protein_g' => $item['protein_g'],
+                'carbs_g' => $item['carbs_g'],
+                'fat_g' => $item['fat_g'],
+                'sodium_mg' => $item['sodium_mg']
+            ];
+        }
 
         $result[] = [
             'id' => $item['id'],
             'name' => $item['name'],
             'description' => $item['description'],
+            'category' => $item['category'] ?? 'Uncategorized',
+            'dietary' => $dietary,
             'current_price' => round($current_price, 2),
             'base_price' => $item['base_price'],
-            'online_pool_qty' => $item['online_pool_qty'],
+            'stock' => $item['online_pool_qty'], // For frontend UI
+            'online_pool_qty' => $item['online_pool_qty'], // Backwards compatibility
+            'ingredients' => $ingredients,
+            'allergens' => $critical_allergens,
             'critical_allergens' => $critical_allergens,
+            'sensitivities' => $digestive_sensitivities,
             'digestive_sensitivities' => $digestive_sensitivities,
+            'macros' => $macros,
             'has_critical' => count($critical_allergens) > 0 ? 1 : 0
         ];
     }
