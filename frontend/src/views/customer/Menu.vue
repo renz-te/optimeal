@@ -1006,6 +1006,9 @@ const processOrder = async (type) => {
       
       const data = await res.json()
       confirmedToken.value = data.claim_token
+      
+      // Update local menu items to reflect deducted stock
+      await fetchMenu()
     }
     
     showCheckoutOptions.value = false

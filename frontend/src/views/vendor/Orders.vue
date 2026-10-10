@@ -20,15 +20,15 @@
       <div v-for="order in filteredOrders" :key="order.id" class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4" :class="{'opacity-75 bg-slate-50': order.status === 'refunded' || order.status === 'expired'}">
         <div>
           <div class="flex items-center space-x-3 mb-2">
-            <span class="text-xl font-black" :class="order.status === 'refunded' || order.status === 'expired' ? 'line-through text-slate-400' : 'text-slate-800'">#{{ order.token }}</span>
-            <span v-if="order.status === 'refunded'" class="px-2 py-1 text-[10px] font-bold uppercase rounded-full bg-rose-100 text-rose-700 border border-rose-200">Refunded</span>
+            <span class="text-xl font-black" :class="order.status === 'refunded' || order.status === 'expired' || order.status === 'cancelled' ? 'line-through text-slate-400' : 'text-slate-800'">#{{ order.token || order.claim_token }}</span>
+            <span v-if="order.status === 'refunded' || order.status === 'cancelled'" class="px-2 py-1 text-[10px] font-bold uppercase rounded-full bg-rose-100 text-rose-700 border border-rose-200">Refunded / Cancelled</span>
             <span v-else-if="order.status === 'expired'" class="px-2 py-1 text-[10px] font-bold uppercase rounded-full bg-slate-100 text-slate-700 border border-slate-200">Expired - Kitchen Loss</span>
             <span v-else class="px-2 py-1 text-[10px] font-bold uppercase rounded-full" :class="order.fulfillment_type === 'take_out' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'">
               {{ order.fulfillment_type === 'take_out' ? 'Take-Out (Packed)' : 'Dine-In (Tray)' }}
             </span>
           </div>
           <div class="text-sm text-slate-600 font-medium">
-            {{ order.items.length }} Items &bull; ₱{{ order.total.toFixed(2) }}
+            {{ order.items.length }} Items &bull; ₱{{ (order.total || parseFloat(order.total_amount || 0)).toFixed(2) }}
           </div>
         </div>
         <div class="flex items-center gap-3 w-full md:w-auto mt-2 md:mt-0">
@@ -45,32 +45,89 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useSandbox } from '../../stores/sandbox'
 
-const { sandboxOrders, sandboxMenu } = useSandbox()
+const { sandboxOrders, sandboxMenu, activePreviewMode } = useSandbox()
 const activeTab = ref('Pending Pickup')
+const localOrders = ref([])
+
+const isAdmin = computed(() => {
+  try {
+    const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}')
+    return user.role === 'admin'
+  } catch (e) {
+    return false
+  }
+})
+
+const isSandbox = computed(() => {
+  return isAdmin.value && activePreviewMode.value === 'vendor'
+})
+
+const orders = computed(() => {
+  return isSandbox.value ? sandboxOrders.value : localOrders.value
+})
 
 const filteredOrders = computed(() => {
-  if (activeTab.value === 'Pending Pickup') return sandboxOrders.value.filter(o => !o.claimed && o.status !== 'refunded' && o.status !== 'expired')
-  if (activeTab.value === 'Claimed') return sandboxOrders.value.filter(o => o.claimed)
-  if (activeTab.value === 'Refunded') return sandboxOrders.value.filter(o => o.status === 'refunded')
-  if (activeTab.value === 'Expired') return sandboxOrders.value.filter(o => o.status === 'expired')
+  if (activeTab.value === 'Pending Pickup') return orders.value.filter(o => !o.claimed && o.status !== 'refunded' && o.status !== 'expired' && o.status !== 'cancelled' && o.status !== 'completed' && o.status !== 'claimed')
+  if (activeTab.value === 'Claimed') return orders.value.filter(o => o.claimed || o.status === 'claimed')
+  if (activeTab.value === 'Refunded') return orders.value.filter(o => o.status === 'refunded' || o.status === 'cancelled')
+  if (activeTab.value === 'Expired') return orders.value.filter(o => o.status === 'expired')
   return []
 })
 
+const fetchOrders = async () => {
+  if (isSandbox.value) return;
+  try {
+    const res = await fetch('/api/vendor/orders')
+    if (res.ok) {
+      localOrders.value = await res.json()
+    }
+  } catch(e) {
+    console.error('Failed to fetch orders:', e)
+  }
+}
+
+onMounted(() => {
+  fetchOrders()
+})
+
+const updateOrderStatus = async (orderId, newStatus) => {
+  if (isSandbox.value) {
+    const order = sandboxOrders.value.find(o => o.id === orderId)
+    if (order) {
+      if (newStatus === 'claimed') order.claimed = true
+      if (newStatus === 'cancelled') {
+        order.status = 'refunded'
+        order.items.forEach(c => {
+          const menuItem = sandboxMenu.value.find(m => m.id === c.item.id)
+          if (menuItem) menuItem.stock += c.quantity
+        })
+      }
+    }
+    return;
+  }
+  
+  try {
+    const res = await fetch('/api/vendor/orders/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId, status: newStatus })
+    })
+    if (res.ok) {
+      await fetchOrders()
+    }
+  } catch(e) {
+    console.error('Failed to update order status:', e)
+  }
+}
+
 const markClaimed = (order) => {
-  order.claimed = true
+  updateOrderStatus(order.id, 'claimed')
 }
 
 const refundOrder = (order) => {
-  order.status = 'refunded'
-  // Restore inventory stock back to live menu
-  order.items.forEach(c => {
-    const menuItem = sandboxMenu.value.find(m => m.id === c.item.id)
-    if (menuItem) {
-      menuItem.stock += c.quantity
-    }
-  })
+  updateOrderStatus(order.id, 'cancelled')
 }
 </script>
