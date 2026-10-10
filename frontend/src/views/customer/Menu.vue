@@ -549,7 +549,15 @@ import { Utensils, ShoppingBag, Clock, SlidersHorizontal, AlertTriangle, X, Plus
 import { useSandbox } from '../../stores/sandbox'
 
 const router = useRouter()
-const { activePreviewMode, sandboxMenu: menuItems, simulatedDietaryFlags, sandboxOrders } = useSandbox()
+const { activePreviewMode, sandboxMenu, simulatedDietaryFlags, sandboxOrders } = useSandbox()
+
+const localMenuItems = ref([])
+const menuItems = computed(() => {
+  if (isAdmin.value && activePreviewMode.value === 'customer') {
+    return sandboxMenu.value
+  }
+  return localMenuItems.value
+})
 
 const isAdmin = computed(() => {
   try {
@@ -683,7 +691,22 @@ watch(menuItems, () => {
   reconcileCart()
 }, { deep: true })
 
+const fetchMenu = async () => {
+  if (isAdmin.value && activePreviewMode.value === 'customer') {
+    return; // Rely on sandbox data
+  }
+  try {
+    const res = await fetch('/api/menu?store_id=1')
+    if (res.ok) {
+      localMenuItems.value = await res.json()
+    }
+  } catch (e) {
+    console.error('Failed to load live menu:', e)
+  }
+}
+
 onMounted(() => {
+  fetchMenu()
   reconcileCart()
   
   window.addEventListener('optimeal_menu_updated', () => {
