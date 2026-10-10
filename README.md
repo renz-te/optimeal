@@ -1,5 +1,8 @@
 # OptiMeal
 
+## Overview
+OptiMeal is a single-cafeteria menu and order management system that bridges the gap between canteen operations and student dietary safety. By utilizing a single-cafeteria architecture, we streamline inventory management and real-time order processing for a unified vendor interface.
+
 ## AI-Assisted Menu Enrichment
 
 As part of the capstone project's core innovation, OptiMeal integrates an AI-driven menu enrichment feature utilizing the Google Gemini API. This feature fundamentally reduces vendor onboarding friction while safely providing estimated nutritional data to end-users.
@@ -12,7 +15,7 @@ The integration uses the `gemini-3.5-flash` model, guided by strict system promp
 
 ### Safety Architecture (Sandboxing the AI)
 A primary concern with LLM integrations in food service is allergen hallucination. OptiMeal employs a strict "sandboxed" architecture to mitigate this risk. 
-- The AI **only** returns a list of raw ingredients (e.g., "Peanut Butter", "Shrimp").
+- The AI **only** returns a list of raw ingredients and macro estimates. It is explicitly instructed using named reference sources (e.g. USDA National Nutrient Database).
 - The AI is **never** responsible for tagging or identifying critical allergens directly. 
 - When the vendor saves the dish, the backend iterates through the ingredients and cross-references a highly structured, relational lookup table (`ingredient_allergen_map`). 
 - If an ingredient matches a known allergen, the system automatically tags the menu item and flags it in the dietary conflict engine. This ensures that the application's safety guarantees remain deterministic and mathematically sound, independent of the AI's behavior.
@@ -21,3 +24,7 @@ A primary concern with LLM integrations in food service is allergen hallucinatio
 To ensure system resilience and optimize API usage constraints (such as Free Tier Rate Limits of HTTP 429), we implemented a database-backed caching layer (`ai_query_cache`).
 - **Caching**: Upon a successful Gemini API request, the dish name (normalized) and its exact JSON response payload are saved to the database. Subsequent requests for the same dish bypass the API entirely, returning the cached payload instantly.
 - **Graceful Fallback**: If the Gemini API limit is exhausted, the backend intercepts the failure and returns a structured `503 Service Unavailable` response with a `fallback: true` flag. The frontend gracefully degrades, prompting the vendor to manually input the ingredients and macros, ensuring that canteen operations are never blocked by external service outages.
+
+### Current Platform Limitations
+- The system currently operates on a **single-cafeteria model**; multi-tenant multi-stall scaling is not supported natively in this branch.
+- The AI estimation is strictly an approximation for educational purposes and should not override certified medical guidance for critical diets.

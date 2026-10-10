@@ -150,7 +150,7 @@ const mockUsers = ref([
   },
   {
     id: 4,
-    name: 'Main Cafeteria Stall',
+    name: 'Main Cafeteria',
     email: 'canteen@optimeal.test',
     role: 'vendor',
     dietary_flags: { allergens: [], sensitivities: [], dietary: [] }

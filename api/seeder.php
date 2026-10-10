@@ -10,7 +10,7 @@ $users = [
         'phone_number' => '09123456789'
     ],
     [
-        'name' => 'Main Cafeteria Stall',
+        'name' => 'Main Cafeteria',
         'email' => 'canteen@optimeal.test',
         'password' => password_hash('password123', PASSWORD_BCRYPT),
         'role' => 'vendor',

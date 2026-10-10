@@ -13,7 +13,7 @@
         <Activity :size="32" />
       </div>
       <h3 class="text-xl font-bold text-slate-900 mb-2">Detailed Analytics Engine</h3>
-      <p class="text-slate-500 max-w-md mx-auto">Full reporting charts, stall-by-stall breakdown, and cross-referenced allergen trends are being configured.</p>
+      <p class="text-slate-500 max-w-md mx-auto">Full reporting charts, cafeteria-wide breakdown, and cross-referenced allergen trends are being configured.</p>
     </div>
   </div>
 </template>
