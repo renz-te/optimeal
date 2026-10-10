@@ -1,5 +1,9 @@
 USE optimeal;
 
+-- Ensure schema updates for phase 2
+ALTER TABLE menu_items ADD COLUMN category VARCHAR(100) DEFAULT 'Uncategorized';
+ALTER TABLE menu_items ADD COLUMN dietary JSON;
+
 -- Pricing Rules table
 CREATE TABLE IF NOT EXISTS pricing_rules (
     id INT AUTO_INCREMENT PRIMARY KEY,

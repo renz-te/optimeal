@@ -437,6 +437,11 @@
           </button>
         </div>
         <div class="p-6 space-y-4">
+          <div v-if="checkoutError" class="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-lg text-sm font-medium flex items-start gap-2 shadow-sm">
+            <AlertTriangle :size="16" class="shrink-0 mt-0.5" />
+            <span>{{ checkoutError }}</span>
+          </div>
+
           <button @click="processOrder('express')" class="w-full text-left p-4 border-2 border-emerald-500 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors group">
             <div class="flex items-center justify-between mb-1">
               <span class="font-bold text-emerald-900">Pre-Order & Pay</span>
@@ -602,6 +607,7 @@ const confirmedTotal = ref(0)
 const confirmedFulfillmentType = ref('dine_in')
 const orderType = ref('dine_in')
 const limitWarning = ref('')
+const checkoutError = ref('')
 let limitWarningTimeout = null
 
 const conflictModalOpen = ref(false)
@@ -925,13 +931,13 @@ const initiateCheckout = () => {
 }
 
 const proceedToCheckout = () => {
+  checkoutError.value = ''
   showCheckoutOptions.value = true
 }
 
 const processOrder = async (type) => {
+  checkoutError.value = ''
   const currentTotal = cartTotal.value
-  showCheckoutOptions.value = false
-  showPlateDrawer.value = false
   confirmationType.value = type
   
   try {
@@ -966,20 +972,29 @@ const processOrder = async (type) => {
         body: JSON.stringify(payload)
       })
       
-      if (!res.ok) throw new Error('API Error')
+      if (!res.ok) {
+        let errorMsg = 'Server error occurred during checkout.';
+        try {
+          const errorData = await res.json();
+          if (errorData.error) errorMsg = errorData.error;
+        } catch (parseError) {}
+        throw new Error(errorMsg);
+      }
       
       const data = await res.json()
       confirmedToken.value = data.claim_token
     }
+    
+    showCheckoutOptions.value = false
+    showPlateDrawer.value = false
+    confirmedTotal.value = currentTotal
+    confirmedFulfillmentType.value = orderType.value
+    showConfirmationDrawer.value = true
+    cart.value = []
   } catch (e) {
-    console.warn('API error or offline mode, falling back to mock token', e)
-    confirmedToken.value = Math.floor(1000 + Math.random() * 9000).toString()
+    console.error('Checkout failed:', e)
+    checkoutError.value = e.message
   }
-  
-  confirmedTotal.value = currentTotal
-  confirmedFulfillmentType.value = orderType.value
-  showConfirmationDrawer.value = true
-  cart.value = []
 }
 
 const convertToTakeOut = () => {

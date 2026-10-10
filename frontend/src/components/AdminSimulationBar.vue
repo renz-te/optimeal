@@ -78,7 +78,17 @@ const { activePreviewMode, simulatedDietaryFlags, resetSandboxState } = useSandb
 
 const activePreset = ref('default')
 
+const props = defineProps({
+  userRole: {
+    type: String,
+    default: ''
+  }
+})
+
 const isAdmin = computed(() => {
+  if (props.userRole) {
+    return props.userRole === 'admin'
+  }
   try {
     const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}')
     return user.role === 'admin'

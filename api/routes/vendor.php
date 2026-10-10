@@ -217,6 +217,9 @@ function handleSaveDish($pdo) {
     
     $dishId = isset($input['id']) ? $input['id'] : null;
     
+    $category = isset($input['category']) ? $input['category'] : 'Uncategorized';
+    $dietary = isset($input['dietary']) && is_array($input['dietary']) ? json_encode($input['dietary']) : json_encode([]);
+    
     $calories = isset($input['macros']['calories']) ? $input['macros']['calories'] : null;
     $protein_g = isset($input['macros']['protein_g']) ? $input['macros']['protein_g'] : null;
     $carbs_g = isset($input['macros']['carbs_g']) ? $input['macros']['carbs_g'] : null;
@@ -229,41 +232,62 @@ function handleSaveDish($pdo) {
         jsonResponse(['error' => 'AI-estimated macros must be explicitly confirmed by the vendor'], 400);
     }
     
-    if ($dishId) {
-        $stmt = $pdo->prepare("
-            UPDATE menu_items 
-            SET name = ?, description = ?, base_price = ?, price_floor = ?, image_url = ?,
-                calories = ?, protein_g = ?, carbs_g = ?, fat_g = ?, sodium_mg = ?, ai_confirmed = ?
-            WHERE id = ? AND store_id = ?
-        ");
-        $stmt->execute([
-            htmlspecialchars(trim($input['name'])), 
-            isset($input['description']) ? htmlspecialchars(trim($input['description'])) : null,
-            $input['base_price'],
-            isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
-            isset($input['image_url']) ? $input['image_url'] : null,
-            $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
-            $dishId, $store_id
-        ]);
+    try {
+        $pdo->beginTransaction();
         
-        $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$dishId]);
-        $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$dishId]);
-    } else {
-        $stmt = $pdo->prepare("
-            INSERT INTO menu_items (store_id, name, description, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([
-            $store_id,
-            htmlspecialchars(trim($input['name'])),
-            isset($input['description']) ? htmlspecialchars(trim($input['description'])) : null,
-            $input['base_price'],
-            isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
-            isset($input['image_url']) ? $input['image_url'] : null,
-            $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed
-        ]);
-        $dishId = $pdo->lastInsertId();
-    }
+        if ($dishId) {
+            $stmt = $pdo->prepare("
+                UPDATE menu_items 
+                SET name = ?, description = ?, category = ?, dietary = ?, base_price = ?, price_floor = ?, image_url = ?,
+                    calories = ?, protein_g = ?, carbs_g = ?, fat_g = ?, sodium_mg = ?, ai_confirmed = ?
+                WHERE id = ? AND store_id = ?
+            ");
+            $stmt->execute([
+                htmlspecialchars(trim($input['name'])), 
+                isset($input['description']) ? htmlspecialchars(trim($input['description'])) : null,
+                $category,
+                $dietary,
+                $input['base_price'],
+                isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
+                isset($input['image_url']) ? $input['image_url'] : null,
+                $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
+                $dishId, $store_id
+            ]);
+            
+            $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$dishId]);
+            $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$dishId]);
+        } else {
+            $stmt = $pdo->prepare("
+                INSERT INTO menu_items (store_id, name, description, category, dietary, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $store_id,
+                htmlspecialchars(trim($input['name'])),
+                isset($input['description']) ? htmlspecialchars(trim($input['description'])) : null,
+                $category,
+                $dietary,
+                $input['base_price'],
+                isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
+                isset($input['image_url']) ? $input['image_url'] : null,
+                $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed
+            ]);
+            $dishId = $pdo->lastInsertId();
+            
+            // Auto-insert inventory record
+            $invStmt = $pdo->prepare("
+                INSERT INTO inventory (menu_item_id, walkin_pool_qty, online_pool_qty, critical_stock_threshold, delisted_from_app)
+                VALUES (?, 0, 0, 2, 0)
+            ");
+            $invStmt->execute([$dishId]);
+            
+            // Auto-insert default pricing rule
+            $prStmt = $pdo->prepare("
+                INSERT INTO pricing_rules (menu_item_id, rush_hour_end_time, decay_start_offset_minutes, decay_rate_percent, decay_interval_minutes, min_stock_to_trigger_decay)
+                VALUES (?, '13:30:00', 30, 5.00, 15, 3)
+            ");
+            $prStmt->execute([$dishId]);
+        }
     
     if (!empty($input['ingredientsString'])) {
         $ingredients = array_filter(array_map('trim', explode(',', $input['ingredientsString'])));
@@ -292,17 +316,23 @@ function handleSaveDish($pdo) {
         }
     }
     
-    $mappedAllergenNames = [];
-    if ($dishId) {
-        $stmt = $pdo->prepare("
-            SELECT ca.name 
-            FROM menu_item_critical_allergens mica
-            JOIN critical_allergens ca ON mica.allergen_id = ca.id
-            WHERE mica.menu_item_id = ?
-        ");
-        $stmt->execute([$dishId]);
-        $mappedAllergenNames = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $mappedAllergenNames = [];
+        if ($dishId) {
+            $stmt = $pdo->prepare("
+                SELECT ca.name 
+                FROM menu_item_critical_allergens mica
+                JOIN critical_allergens ca ON mica.allergen_id = ca.id
+                WHERE mica.menu_item_id = ?
+            ");
+            $stmt->execute([$dishId]);
+            $mappedAllergenNames = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        }
+        
+        $pdo->commit();
+        
+        jsonResponse(['message' => 'Dish saved', 'id' => $dishId, 'mapped_allergens' => $mappedAllergenNames]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        jsonResponse(['error' => 'Failed to save dish: ' . $e->getMessage()], 500);
     }
-    
-    jsonResponse(['message' => 'Dish saved', 'id' => $dishId, 'mapped_allergens' => $mappedAllergenNames]);
 }

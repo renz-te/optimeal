@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS menu_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
     store_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
+    category VARCHAR(100) DEFAULT 'Uncategorized',
+    dietary JSON,
     base_price DECIMAL(10, 2) NOT NULL,
     price_floor DECIMAL(10, 2) NOT NULL,
     description TEXT,

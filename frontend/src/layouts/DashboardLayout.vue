@@ -1,6 +1,6 @@
 <template>
   <div class="flex h-screen bg-slate-100 font-sans antialiased text-slate-900 overflow-hidden">
-    <AdminSimulationBar />
+    <AdminSimulationBar :user-role="role" />
     <!-- Desktop Sidebar -->
     <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full flex-shrink-0 relative z-20 shadow-xl">
       <div class="p-6">
