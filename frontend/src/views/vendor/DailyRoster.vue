@@ -401,6 +401,16 @@ const addNewAllergen = () => {
 }
 
 const saveDish = async () => {
+  if (!formData.name || !formData.name.trim()) {
+    showToast('Please enter a dish name.', 'error')
+    return
+  }
+
+  if (formData.base_price === null || formData.base_price === '' || isNaN(formData.base_price) || Number(formData.base_price) <= 0) {
+    showToast('Please enter a valid base price.', 'error')
+    return
+  }
+
   if (formData.macros.calories !== null && formData.macros.calories !== '' && !formData.ai_confirmed) {
     showToast('Please review and confirm the ingredients and macros before saving.', 'error')
     return
@@ -408,10 +418,10 @@ const saveDish = async () => {
 
   const payload = {
     id: editItem.value ? editItem.value.id : null,
-    name: formData.name,
-    description: formData.description,
+    name: formData.name.trim(),
+    description: formData.description ? formData.description.trim() : '',
     category: formData.category,
-    base_price: formData.base_price,
+    base_price: Number(formData.base_price),
     ingredientsString: formData.ingredientsString,
     macros: formData.macros,
     ai_confirmed: formData.ai_confirmed,
@@ -420,7 +430,6 @@ const saveDish = async () => {
 
   let finalAllergens = [...formData.allergens]
   let returnedId = null
-  let isOffline = false
 
   try {
     const res = await fetch('/api/vendor/dish', {
@@ -429,23 +438,40 @@ const saveDish = async () => {
       body: JSON.stringify(payload)
     })
     
-    if (!res.ok) throw new Error('Failed to save dish')
-    const data = await res.json()
+    let data = {}
+    try {
+      data = await res.json()
+    } catch (parseErr) {
+      // Non-JSON response
+    }
+
+    if (!res.ok) {
+      const errorMsg = data.error || `Server error (${res.status}): Failed to save dish.`
+      showToast(errorMsg, 'error')
+      return
+    }
+
+    if (!data.id && !editItem.value) {
+      showToast('Server did not return a valid dish ID.', 'error')
+      return
+    }
+
     returnedId = data.id
-    
-    if (data.mapped_allergens && data.mapped_allergens.length > 0) {
+
+    if (data.mapped_allergens && Array.isArray(data.mapped_allergens) && data.mapped_allergens.length > 0) {
       finalAllergens = [...new Set([...finalAllergens, ...data.mapped_allergens])]
     }
   } catch (err) {
-    isOffline = true
+    showToast(`Network error: ${err.message}`, 'error')
+    return
   }
 
   const ingredients = formData.ingredientsString.split(',').map(s => s.trim()).filter(Boolean)
   const dishData = {
-    name: formData.name,
-    description: formData.description,
+    name: formData.name.trim(),
+    description: formData.description ? formData.description.trim() : '',
     category: formData.category,
-    base_price: formData.base_price,
+    base_price: Number(formData.base_price),
     ingredients,
     allergens: finalAllergens,
     dietary: [...formData.dietary],
@@ -458,8 +484,10 @@ const saveDish = async () => {
   if (editItem.value) {
     const idx = masterCatalog.value.findIndex(d => d.id === editItem.value.id)
     if (idx !== -1) masterCatalog.value[idx] = { ...masterCatalog.value[idx], ...dishData }
+    const rosterIdx = activeRoster.value.findIndex(d => d.id === editItem.value.id)
+    if (rosterIdx !== -1) activeRoster.value[rosterIdx] = { ...activeRoster.value[rosterIdx], ...dishData }
   } else {
-    const idToUse = returnedId || Date.now()
+    const idToUse = returnedId
     if (formData.saveToCatalog) {
       masterCatalog.value.push({ ...dishData, id: idToUse })
     } else {
@@ -474,10 +502,7 @@ const saveDish = async () => {
   }
 
   closeModal()
-  
-  if (isOffline) {
-    showToast('Backend unreachable. Dish saved locally (Offline Mode).', 'error')
-  }
+  showToast(editItem.value ? 'Dish updated successfully!' : 'Dish added successfully!', 'success')
 }
 
 const launchMenu = async () => {
