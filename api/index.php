@@ -96,6 +96,18 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/orders' && $method === 'GET') {
     require 'routes/customer.php';
     handleGetCustomerOrders($pdo);
+} elseif ($route === '/vendor/decay' && $method === 'GET') {
+    requireStaff($pdo);
+    require 'routes/vendor.php';
+    handleGetDecayConfig($pdo);
+} elseif ($route === '/vendor/decay' && $method === 'POST') {
+    requireStaff($pdo);
+    require 'routes/vendor.php';
+    handleUpdateDecayConfig($pdo);
+} elseif ($route === '/vendor/decay/emergency' && $method === 'POST') {
+    requireStaff($pdo);
+    require 'routes/vendor.php';
+    handleTriggerEmergencyDecay($pdo);
 } elseif ($route === '/vendor/pricing-rules' && $method === 'GET') {
     require 'routes/vendor.php';
     handleGetPricingRules($pdo);

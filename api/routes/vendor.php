@@ -551,3 +551,94 @@ function handleGetVendorMenu($pdo) {
 
     jsonResponse($result);
 }
+
+function handleGetDecayConfig($pdo) {
+    $stmt = $pdo->query("SELECT closing_time, tier1_minutes_before_close, tier1_discount_percent, tier2_minutes_before_close, tier2_discount_percent, emergency_clearance_active, emergency_activated_at FROM settings WHERE id = 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$settings) {
+        $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, tier1_minutes_before_close, tier1_discount_percent, tier2_minutes_before_close, tier2_discount_percent, emergency_clearance_active) VALUES (1, 30, '07:00', '20:00', 5, 10.00, 1, 120, 25.00, 60, 40.00, 0)");
+        $stmt = $pdo->query("SELECT closing_time, tier1_minutes_before_close, tier1_discount_percent, tier2_minutes_before_close, tier2_discount_percent, emergency_clearance_active, emergency_activated_at FROM settings WHERE id = 1");
+        $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    jsonResponse([
+        'closing_time' => $settings['closing_time'] ?? '20:00',
+        'tier1_minutes_before_close' => (int)($settings['tier1_minutes_before_close'] ?? 120),
+        'tier1_discount_percent' => (float)($settings['tier1_discount_percent'] ?? 25.00),
+        'tier2_minutes_before_close' => (int)($settings['tier2_minutes_before_close'] ?? 60),
+        'tier2_discount_percent' => (float)($settings['tier2_discount_percent'] ?? 40.00),
+        'emergency_clearance_active' => (bool)($settings['emergency_clearance_active'] ?? 0),
+        'emergency_activated_at' => $settings['emergency_activated_at'] ?? null
+    ]);
+}
+
+function handleUpdateDecayConfig($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+    $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+    $current = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $closingTime = isset($input['closing_time']) ? trim($input['closing_time']) : ($current['closing_time'] ?? '20:00');
+    if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $closingTime)) {
+        jsonResponse(['error' => 'Invalid closing_time format. Expected HH:MM.'], 400);
+    }
+
+    $tier1Minutes = isset($input['tier1_minutes_before_close']) ? max(0, (int)$input['tier1_minutes_before_close']) : (int)($current['tier1_minutes_before_close'] ?? 120);
+    $tier2Minutes = isset($input['tier2_minutes_before_close']) ? max(0, (int)$input['tier2_minutes_before_close']) : (int)($current['tier2_minutes_before_close'] ?? 60);
+
+    if ($tier1Minutes <= $tier2Minutes) {
+        jsonResponse(['error' => 'Tier 1 must occur earlier than Tier 2 (higher minutes before close).'], 400);
+    }
+
+    $tier1Discount = isset($input['tier1_discount_percent']) ? (float)$input['tier1_discount_percent'] : (float)($current['tier1_discount_percent'] ?? 25.00);
+    $tier2Discount = isset($input['tier2_discount_percent']) ? (float)$input['tier2_discount_percent'] : (float)($current['tier2_discount_percent'] ?? 40.00);
+
+    if ($tier1Discount < 0 || $tier1Discount > 100 || $tier2Discount < 0 || $tier2Discount > 100) {
+        jsonResponse(['error' => 'Discount percentages must be between 0% and 100%.'], 400);
+    }
+
+    $stmtUpdate = $pdo->prepare("
+        UPDATE settings 
+        SET closing_time = ?,
+            tier1_minutes_before_close = ?,
+            tier1_discount_percent = ?,
+            tier2_minutes_before_close = ?,
+            tier2_discount_percent = ?
+        WHERE id = 1
+    ");
+    $stmtUpdate->execute([$closingTime, $tier1Minutes, $tier1Discount, $tier2Minutes, $tier2Discount]);
+
+    jsonResponse([
+        'message' => 'Decay rules updated successfully',
+        'config' => [
+            'closing_time' => $closingTime,
+            'tier1_minutes_before_close' => $tier1Minutes,
+            'tier1_discount_percent' => $tier1Discount,
+            'tier2_minutes_before_close' => $tier2Minutes,
+            'tier2_discount_percent' => $tier2Discount,
+            'emergency_clearance_active' => (bool)($current['emergency_clearance_active'] ?? 0),
+            'emergency_activated_at' => $current['emergency_activated_at'] ?? null
+        ]
+    ]);
+}
+
+function handleTriggerEmergencyDecay($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    
+    // If active flag is provided, use it; otherwise default to activating (1)
+    $active = isset($input['active']) ? ($input['active'] ? 1 : 0) : 1;
+
+    $stmt = $pdo->prepare("
+        UPDATE settings 
+        SET emergency_clearance_active = ?,
+            emergency_activated_at = CASE WHEN ? = 1 THEN NOW() ELSE NULL END
+        WHERE id = 1
+    ");
+    $stmt->execute([$active, $active]);
+
+    jsonResponse([
+        'message' => $active ? 'Emergency 50% clearance activated!' : 'Emergency clearance deactivated.',
+        'emergency_clearance_active' => (bool)$active
+    ]);
+}

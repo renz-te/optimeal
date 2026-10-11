@@ -4,7 +4,63 @@ function requireCustomer($pdo) {
     return $session['user_id'];
 }
 
+function getCustomerSettings($pdo) {
+    $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$settings) {
+        $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, tier1_minutes_before_close, tier1_discount_percent, tier2_minutes_before_close, tier2_discount_percent, emergency_clearance_active) VALUES (1, 30, '07:00', '20:00', 5, 10.00, 1, 120, 25.00, 60, 40.00, 0)");
+        $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+        $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+    return $settings;
+}
+
+function expireUnclaimedOrdersAfterClosing($pdo) {
+    try {
+        $stmt = $pdo->prepare("SELECT id FROM orders WHERE status = 'reserved'");
+        $stmt->execute();
+        $expired_orders = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (count($expired_orders) > 0) {
+            $placeholders = str_repeat('?,', count($expired_orders) - 1) . '?';
+            $updateStatus = $pdo->prepare("UPDATE orders SET status = 'expired' WHERE id IN ($placeholders)");
+            $updateStatus->execute($expired_orders);
+
+            $itemsStmt = $pdo->prepare("SELECT menu_item_id, quantity, order_id FROM order_items WHERE order_id IN ($placeholders)");
+            $itemsStmt->execute($expired_orders);
+            $order_items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $restoreInv = $pdo->prepare("
+                UPDATE inventory 
+                SET online_pool_qty = online_pool_qty + ?, 
+                    delisted_from_app = CASE WHEN online_pool_qty + ? <= critical_stock_threshold THEN 1 ELSE 0 END 
+                WHERE menu_item_id = ?
+            ");
+            $refundClaim = $pdo->prepare("
+                UPDATE daily_discount_claims d
+                JOIN orders o ON o.user_id = d.user_id
+                SET d.quantity_claimed = GREATEST(0, d.quantity_claimed - ?)
+                WHERE d.menu_item_id = ? AND o.id = ? AND d.claim_date = DATE(o.reserved_at)
+            ");
+
+            foreach ($order_items as $item) {
+                $restoreInv->execute([$item['quantity'], $item['quantity'], $item['menu_item_id']]);
+                $refundClaim->execute([$item['quantity'], $item['menu_item_id'], $item['order_id']]);
+            }
+        }
+    } catch (Exception $e) {
+        // Log/ignore silently to not break flow
+    }
+}
+
 function handleGetMenu($pdo) {
+    $settings = getCustomerSettings($pdo);
+
+    // Closing behavior: after closing_time, menu endpoint returns no purchasable items
+    if (PricingEngine::isPastClosing($settings)) {
+        jsonResponse([]);
+    }
+
     $store_id = $_GET['store_id'] ?? null;
     if (!$store_id) {
         $stmtStore = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
@@ -21,12 +77,9 @@ function handleGetMenu($pdo) {
     $stmt = $pdo->prepare("
         SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url,
                m.category, m.dietary, m.ai_confirmed, m.calories, m.protein_g, m.carbs_g, m.fat_g, m.sodium_mg,
-               i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
-               pr.rush_hour_end_time, pr.decay_start_offset_minutes, pr.decay_rate_percent, 
-               pr.decay_interval_minutes, pr.min_stock_to_trigger_decay
+               i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app
         FROM menu_items m
         LEFT JOIN inventory i ON m.id = i.menu_item_id
-        LEFT JOIN pricing_rules pr ON m.id = pr.menu_item_id
         WHERE m.store_id = ? AND m.is_active = 1 AND i.delisted_from_app = 0
     ");
     $stmt->execute([$store_id]);
@@ -34,17 +87,12 @@ function handleGetMenu($pdo) {
 
     $result = [];
     foreach ($items as $item) {
-        $current_price = $item['base_price'];
-        
-        // 1. Dynamic pricing resolution using PricingEngine
-        if ($item['rush_hour_end_time']) {
-            $current_price = PricingEngine::calculateCurrentPrice(
-                $item['base_price'], $item['price_floor'], $item['rush_hour_end_time'],
-                $item['decay_start_offset_minutes'], $item['decay_rate_percent'],
-                $item['decay_interval_minutes'], $item['min_stock_to_trigger_decay'],
-                $item['online_pool_qty']
-            );
-        }
+        // 1. Unified dynamic pricing resolution using global settings tiers
+        $current_price = PricingEngine::calculateCurrentPrice(
+            $item['base_price'],
+            $item['price_floor'],
+            $settings
+        );
 
         // 2. Fetch allergens & sensitivities
         $astmt = $pdo->prepare("
@@ -136,6 +184,15 @@ function handleCreateReservation($pdo) {
         jsonResponse(['error' => 'Missing items'], 400);
     }
 
+    $settings = getCustomerSettings($pdo);
+
+    // Closing behavior: reject reservations after closing_time and expire unclaimed orders
+    if (PricingEngine::isPastClosing($settings)) {
+        expireUnclaimedOrdersAfterClosing($pdo);
+        $closingTime = $settings['closing_time'] ?? '20:00';
+        jsonResponse(['error' => "Cafeteria is closed. Reservations cannot be placed after closing time ($closingTime)."], 400);
+    }
+
     // Server-resolved single cafeteria store_id
     $stmtStore = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
     $store_id = $stmtStore->fetchColumn();
@@ -160,8 +217,9 @@ function handleCreateReservation($pdo) {
         $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
             ? $input['fulfillment_type'] 
             : 'dine_in';
-        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token, fulfillment_type) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 30 MINUTE), ?, ?)");
-        $insertOrder->execute([$user_id, $store_id, $claimToken, $fulfillment_type]);
+        $reservationTtl = isset($settings['reservation_ttl']) ? max(1, (int)$settings['reservation_ttl']) : 30;
+        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token, fulfillment_type) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?)");
+        $insertOrder->execute([$user_id, $store_id, $reservationTtl, $claimToken, $fulfillment_type]);
         $order_id = $pdo->lastInsertId();
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
@@ -174,8 +232,8 @@ function handleCreateReservation($pdo) {
             $item_id = $item['menu_item_id'];
             $qty = (int)$item['quantity'];
 
-            // Validate inventory & calculate price for anti-hoarding limit enforcement
-            $stmt = $pdo->prepare("SELECT m.base_price, m.price_floor, pr.rush_hour_end_time, pr.decay_start_offset_minutes, pr.decay_rate_percent, pr.decay_interval_minutes, pr.min_stock_to_trigger_decay, i.online_pool_qty FROM menu_items m JOIN inventory i ON m.id = i.menu_item_id LEFT JOIN pricing_rules pr ON m.id = pr.menu_item_id WHERE m.id = ?");
+            // Validate inventory & calculate price using unified PricingEngine
+            $stmt = $pdo->prepare("SELECT m.base_price, m.price_floor, i.online_pool_qty FROM menu_items m JOIN inventory i ON m.id = i.menu_item_id WHERE m.id = ?");
             $stmt->execute([$item_id]);
             $itemData = $stmt->fetch();
             
@@ -183,27 +241,19 @@ function handleCreateReservation($pdo) {
                 throw new Exception("Not enough inventory for item $item_id");
             }
 
-            $current_price = $itemData['base_price'];
-            $is_discounted = false;
+            $current_price = PricingEngine::calculateCurrentPrice(
+                $itemData['base_price'],
+                $itemData['price_floor'],
+                $settings
+            );
+            $is_discounted = ($current_price < $itemData['base_price']);
 
-            if ($itemData['rush_hour_end_time']) {
-                $current_price = PricingEngine::calculateCurrentPrice(
-                    $itemData['base_price'], $itemData['price_floor'], $itemData['rush_hour_end_time'],
-                    $itemData['decay_start_offset_minutes'], $itemData['decay_rate_percent'],
-                    $itemData['decay_interval_minutes'], $itemData['min_stock_to_trigger_decay'],
-                    $itemData['online_pool_qty']
-                );
-                if ($current_price < $itemData['base_price']) {
-                    $is_discounted = true;
-                }
-            }
-
-            // Anti-hoarding check
+            // Anti-hoarding check using max_discount_qty from global settings
             if ($is_discounted) {
                 $checkClaims->execute([$user_id, $item_id]);
                 $claimed = $checkClaims->fetchColumn() ?: 0;
-                $MAX_DISCOUNT_QTY = 3;
-                if ($claimed + $qty > $MAX_DISCOUNT_QTY) {
+                $maxDiscountQty = isset($settings['max_discount_qty']) ? (int)$settings['max_discount_qty'] : 5;
+                if ($claimed + $qty > $maxDiscountQty) {
                     throw new Exception("Daily discount claim limit exceeded for item $item_id");
                 }
                 $upsertClaims->execute([$user_id, $item_id, $qty, $qty]);

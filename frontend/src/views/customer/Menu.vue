@@ -493,9 +493,12 @@
           </div>
 
           <div v-if="confirmedFulfillmentType === 'dine_in'" class="mt-6 w-full">
-            <button @click="convertToTakeOut" class="text-sm bg-white/20 hover:bg-white/30 text-white py-2 px-4 rounded-full transition-colors w-full font-semibold border border-white/30 shadow-sm">
-              No seats available? Pack as Take-Out instead
+            <button @click="convertToTakeOut" :disabled="isConvertingTakeout" class="text-sm bg-white/20 hover:bg-white/30 text-white py-2 px-4 rounded-full transition-colors w-full font-semibold border border-white/30 shadow-sm disabled:opacity-50">
+              {{ isConvertingTakeout ? 'Converting...' : 'No seats available? Pack as Take-Out instead' }}
             </button>
+            <div v-if="takeoutConversionError" class="mt-2 p-2 bg-rose-500/80 border border-rose-300 rounded-lg text-xs text-white text-center font-medium">
+              {{ takeoutConversionError }}
+            </div>
           </div>
           <div v-else class="mt-6 w-full text-center text-sm font-semibold text-emerald-100 bg-white/10 py-2 px-4 rounded-full border border-white/20">
             Fulfillment: Take-Out (Packed)
@@ -613,6 +616,8 @@ const confirmationType = ref('express')
 const confirmedToken = ref('')
 const confirmedTotal = ref(0)
 const confirmedFulfillmentType = ref('dine_in')
+const isConvertingTakeout = ref(false)
+const takeoutConversionError = ref('')
 const orderType = ref('dine_in')
 const limitWarning = ref('')
 const checkoutError = ref('')
@@ -1022,19 +1027,37 @@ const processOrder = async (type) => {
   }
 }
 
-const convertToTakeOut = () => {
-  confirmedFulfillmentType.value = 'take_out';
+const convertToTakeOut = async () => {
+  takeoutConversionError.value = ''
   if (isAdmin.value && activePreviewMode.value === 'customer') {
     const order = sandboxOrders.value.find(o => o.token === confirmedToken.value);
     if (order) {
       order.fulfillment_type = 'take_out';
     }
-  } else {
-    fetch('/api/reservations/update-fulfillment', {
+    confirmedFulfillmentType.value = 'take_out';
+    return;
+  }
+
+  isConvertingTakeout.value = true;
+  try {
+    const res = await fetch('/api/reservations/update-fulfillment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: confirmedToken.value, fulfillment_type: 'take_out' })
-    }).catch(e => console.warn('Mock fallback for updating fulfillment', e))
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update fulfillment on server.');
+    }
+
+    // Only update on verified server success
+    confirmedFulfillmentType.value = 'take_out';
+  } catch (e) {
+    console.error('Failed to update fulfillment:', e);
+    takeoutConversionError.value = e.message || 'Server error: could not convert to take-out.';
+  } finally {
+    isConvertingTakeout.value = false;
   }
 }
 </script>
