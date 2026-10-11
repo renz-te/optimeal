@@ -19,12 +19,27 @@
 
     <hr class="border-slate-100">
 
+    <!-- Nutritional Targets -->
+    <div class="space-y-4">
+      <h3 class="text-lg font-bold text-slate-800">Nutritional Goals</h3>
+      <p class="text-sm text-slate-600">Configure your daily caloric target to personalize your meal recommendations.</p>
+      <div class="max-w-xs">
+        <label class="block text-sm font-bold text-slate-700 mb-1">Target Daily Calories (kcal)</label>
+        <input id="target-calories-input" v-model.number="targetCalories" type="number" min="500" max="6000" step="50"
+               class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all font-semibold text-slate-800"
+               placeholder="2000">
+      </div>
+    </div>
+
+    <hr class="border-slate-100">
+
     <!-- Medical Allergens -->
     <div class="space-y-4">
       <h3 class="text-lg font-bold text-slate-800">Medical Allergens</h3>
       <p class="text-sm text-slate-600">Select any severe allergies. We will block these items from being added to your plate without explicit confirmation.</p>
       <div class="flex flex-wrap gap-2">
         <button v-for="allergen in masterTaxonomy.allergens" :key="allergen"
+                :id="'allergen-' + allergen.toLowerCase().replace(/[^a-z0-9]/g, '-')"
                 @click="toggleArr(selectedAllergens, allergen)"
                 class="px-4 py-2 rounded-full border text-sm font-semibold transition-colors"
                 :class="selectedAllergens.includes(allergen) ? 'bg-rose-50 border-rose-300 text-rose-800' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'">
@@ -85,14 +100,22 @@
     <hr class="border-slate-100">
 
     <!-- Save Button & Feedback -->
-    <div class="flex items-center space-x-4 pt-2">
-      <button @click="saveSettings" class="bg-emerald-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-emerald-700 shadow-sm transition-all active:scale-95">
-        Save Preferences
-      </button>
-      <span v-if="successMessage" class="text-emerald-600 font-medium text-sm flex items-center">
-        <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-        {{ successMessage }}
-      </span>
+    <div class="space-y-3 pt-2">
+      <div v-if="errorMessage" class="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-lg text-sm font-semibold flex items-center">
+        <svg class="w-5 h-5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        {{ errorMessage }}
+      </div>
+
+      <div class="flex items-center space-x-4">
+        <button id="save-preferences-btn" @click="saveSettings" :disabled="saving" class="bg-emerald-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-emerald-700 shadow-sm transition-all active:scale-95 disabled:opacity-50 flex items-center">
+          <span v-if="saving" class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+          Save Preferences
+        </button>
+        <span v-if="successMessage" class="text-emerald-600 font-medium text-sm flex items-center">
+          <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          {{ successMessage }}
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -115,17 +138,22 @@ const isAdmin = computed(() => {
 })
 
 const profile = ref({ name: '', email: '' })
+const targetCalories = ref(2000)
 const selectedAllergens = ref([])
 const selectedBoundaries = ref([])
 const selectedSensitivities = ref([])
 const customWatchlist = ref([])
 const newWatchlistTag = ref('')
 const successMessage = ref('')
+const errorMessage = ref('')
+const loading = ref(false)
+const saving = ref(false)
 
-onMounted(() => {
+const loadProfile = async () => {
   if (isAdmin.value && activePreviewMode.value === 'customer') {
     profile.value.name = 'Simulated Sandbox User'
     profile.value.email = 'sandbox@optimeal.test'
+    targetCalories.value = 2000
     const df = simulatedDietaryFlags.value || {}
     selectedAllergens.value = [...(df.allergens || [])]
     selectedBoundaries.value = [...(df.dietary || [])]
@@ -134,28 +162,32 @@ onMounted(() => {
     return
   }
 
-  const data = localStorage.getItem('optimeal_user')
-  if (data) {
-    try {
-      const parsed = JSON.parse(data)
-      profile.value.name = parsed.name || ''
-      profile.value.email = parsed.email || ''
-      const df = parsed.dietary_flags
-      
-      if (Array.isArray(df)) {
-        selectedAllergens.value = df.filter(f => masterTaxonomy.value.allergens.includes(f))
-        selectedBoundaries.value = df.filter(f => masterTaxonomy.value.dietary.includes(f))
-        selectedSensitivities.value = df.filter(f => masterTaxonomy.value.sensitivities.includes(f))
-      } else if (df && typeof df === 'object') {
-        selectedAllergens.value = df.allergens || []
-        selectedBoundaries.value = df.dietary || []
-        selectedSensitivities.value = df.sensitivities || []
-        customWatchlist.value = df.custom_watchlist || []
-      }
-    } catch (e) {
-      console.error(e)
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const res = await fetch('/api/customer/profile')
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      throw new Error(errData.error || 'Failed to load profile')
     }
+    const data = await res.json()
+    profile.value.name = data.name || ''
+    profile.value.email = data.email || ''
+    targetCalories.value = data.target_calories || 2000
+    selectedAllergens.value = data.allergens || []
+    selectedBoundaries.value = data.dietary_boundaries || []
+    selectedSensitivities.value = data.sensitivities || []
+    customWatchlist.value = data.custom_watchlist || []
+  } catch (err) {
+    console.error('Error loading profile:', err)
+    errorMessage.value = err.message
+  } finally {
+    loading.value = false
   }
+}
+
+onMounted(() => {
+  loadProfile()
 })
 
 const toggleArr = (arr, flag) => {
@@ -179,32 +211,65 @@ const removeWatchlist = (tag) => {
   customWatchlist.value = customWatchlist.value.filter(t => t !== tag)
 }
 
-const saveSettings = () => {
-  const newFlags = {
+const saveSettings = async () => {
+  successMessage.value = ''
+  errorMessage.value = ''
+  saving.value = true
+
+  const payload = {
+    target_calories: targetCalories.value,
     allergens: [...selectedAllergens.value],
+    dietary_boundaries: [...selectedBoundaries.value],
     sensitivities: [...selectedSensitivities.value],
-    dietary: [...selectedBoundaries.value],
     custom_watchlist: [...customWatchlist.value]
   }
 
   if (isAdmin.value && activePreviewMode.value === 'customer') {
-    simulatedDietaryFlags.value = newFlags
+    simulatedDietaryFlags.value = {
+      allergens: payload.allergens,
+      dietary: payload.dietary_boundaries,
+      sensitivities: payload.sensitivities,
+      custom_watchlist: payload.custom_watchlist
+    }
     successMessage.value = 'Sandbox Preferences updated successfully.'
+    saving.value = false
     setTimeout(() => { successMessage.value = '' }, 3000)
     return
   }
 
-  const data = localStorage.getItem('optimeal_user')
-  if (data) {
-    try {
-      const parsed = JSON.parse(data)
-      parsed.dietary_flags = newFlags
-      localStorage.setItem('optimeal_user', JSON.stringify(parsed))
-      successMessage.value = 'Preferences updated successfully.'
-      setTimeout(() => { successMessage.value = '' }, 3000)
-    } catch (e) {
-      console.error(e)
+  try {
+    const res = await fetch('/api/customer/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save preferences')
     }
+
+    const stored = localStorage.getItem('optimeal_user')
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        parsed.dietary_flags = {
+          allergens: payload.allergens,
+          dietary: payload.dietary_boundaries,
+          sensitivities: payload.sensitivities,
+          custom_watchlist: payload.custom_watchlist
+        }
+        localStorage.setItem('optimeal_user', JSON.stringify(parsed))
+      } catch (e) {}
+    }
+
+    successMessage.value = 'Preferences saved successfully.'
+    setTimeout(() => { successMessage.value = '' }, 3000)
+  } catch (err) {
+    console.error('Error saving profile:', err)
+    errorMessage.value = err.message
+  } finally {
+    saving.value = false
   }
 }
 </script>
+

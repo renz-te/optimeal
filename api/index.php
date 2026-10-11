@@ -42,6 +42,10 @@ function requireAdmin($pdo) {
     return requireRole($pdo, ['admin']);
 }
 
+function requireStudent($pdo) {
+    return requireRole($pdo, ['student', 'customer']);
+}
+
 // Simple Router Pattern
 if ($route === '/auth/register' && $method === 'POST') {
     require 'routes/auth.php';
@@ -52,6 +56,14 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/menu' && $method === 'GET') {
     require 'routes/customer.php';
     handleGetMenu($pdo);
+} elseif ($route === '/customer/profile' && $method === 'GET') {
+    requireStudent($pdo);
+    require 'routes/customer.php';
+    handleGetProfile($pdo);
+} elseif ($route === '/customer/profile' && $method === 'POST') {
+    requireStudent($pdo);
+    require 'routes/customer.php';
+    handleUpdateProfile($pdo);
 } elseif ($route === '/reservations' && $method === 'POST') {
     require 'routes/customer.php';
     handleCreateReservation($pdo);

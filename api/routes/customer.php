@@ -283,3 +283,97 @@ function handleUpdateFulfillment($pdo) {
 
     jsonResponse(['message' => 'Fulfillment type updated successfully']);
 }
+
+function handleGetProfile($pdo) {
+    $user_id = $_SESSION['user_id'] ?? null;
+    if (!$user_id) {
+        jsonResponse(['error' => 'Unauthorized'], 401);
+    }
+
+    $stmtUser = $pdo->prepare("SELECT name, email FROM users WHERE id = ?");
+    $stmtUser->execute([$user_id]);
+    $user = $stmtUser->fetch(PDO::FETCH_ASSOC);
+
+    $stmt = $pdo->prepare("SELECT * FROM student_profiles WHERE user_id = ?");
+    $stmt->execute([$user_id]);
+    $profile = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$profile) {
+        jsonResponse([
+            'user_id' => (int)$user_id,
+            'name' => $user['name'] ?? '',
+            'email' => $user['email'] ?? '',
+            'target_calories' => 2000,
+            'allergens' => [],
+            'dietary_boundaries' => [],
+            'sensitivities' => [],
+            'custom_watchlist' => []
+        ]);
+    }
+
+    jsonResponse([
+        'user_id' => (int)$user_id,
+        'name' => $user['name'] ?? '',
+        'email' => $user['email'] ?? '',
+        'target_calories' => (int)($profile['target_calories'] ?? 2000),
+        'allergens' => json_decode($profile['allergens'] ?? '[]', true) ?: [],
+        'dietary_boundaries' => json_decode($profile['dietary_boundaries'] ?? '[]', true) ?: [],
+        'sensitivities' => json_decode($profile['sensitivities'] ?? '[]', true) ?: [],
+        'custom_watchlist' => json_decode($profile['custom_watchlist'] ?? '[]', true) ?: []
+    ]);
+}
+
+function handleUpdateProfile($pdo) {
+    $user_id = $_SESSION['user_id'] ?? null;
+    if (!$user_id) {
+        jsonResponse(['error' => 'Unauthorized'], 401);
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        jsonResponse(['error' => 'Invalid JSON input'], 400);
+    }
+
+    $targetCalories = isset($input['target_calories']) ? (int)$input['target_calories'] : 2000;
+    $allergens = json_encode($input['allergens'] ?? []);
+    $dietaryBoundaries = json_encode($input['dietary_boundaries'] ?? ($input['dietary'] ?? []));
+    $sensitivities = json_encode($input['sensitivities'] ?? []);
+    $customWatchlist = json_encode($input['custom_watchlist'] ?? []);
+
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO student_profiles (user_id, target_calories, allergens, dietary_boundaries, sensitivities, custom_watchlist)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                target_calories = VALUES(target_calories),
+                allergens = VALUES(allergens),
+                dietary_boundaries = VALUES(dietary_boundaries),
+                sensitivities = VALUES(sensitivities),
+                custom_watchlist = VALUES(custom_watchlist),
+                updated_at = NOW()
+        ");
+        $stmt->execute([
+            $user_id,
+            $targetCalories,
+            $allergens,
+            $dietaryBoundaries,
+            $sensitivities,
+            $customWatchlist
+        ]);
+
+        jsonResponse([
+            'message' => 'Profile updated successfully',
+            'profile' => [
+                'user_id' => (int)$user_id,
+                'target_calories' => $targetCalories,
+                'allergens' => json_decode($allergens, true),
+                'dietary_boundaries' => json_decode($dietaryBoundaries, true),
+                'sensitivities' => json_decode($sensitivities, true),
+                'custom_watchlist' => json_decode($customWatchlist, true)
+            ]
+        ]);
+    } catch (PDOException $e) {
+        jsonResponse(['error' => 'Database error: ' . $e->getMessage()], 500);
+    }
+}
+
