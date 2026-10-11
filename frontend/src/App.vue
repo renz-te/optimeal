@@ -1,31 +1,14 @@
 <template>
-  <div id="app" class="min-h-screen flex flex-col">
-    <!-- Persistent Sandbox Bar for Admin -->
-    <AdminSandboxBar v-if="!route.meta.hideSandbox && isSandboxActive" />
-    <component :is="layout">
-      <router-view></router-view>
-    </component>
-  </div>
+  <router-view />
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
-import CustomerLayout from './layouts/CustomerLayout.vue'
-import DashboardLayout from './layouts/DashboardLayout.vue'
-import AdminSandboxBar from './components/AdminSandboxBar.vue'
+import { onMounted } from 'vue'
+import { useAuthStore } from './stores/auth'
 
-const route = useRoute()
-const layout = computed(() => {
-  return route.meta.layout === 'dashboard' ? DashboardLayout : CustomerLayout
-})
+const authStore = useAuthStore()
 
-const isSandboxActive = computed(() => {
-  try {
-    const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}')
-    return user.role === 'admin'
-  } catch (e) {
-    return false
-  }
+onMounted(() => {
+  authStore.initSession()
 })
 </script>
