@@ -38,6 +38,11 @@
               {{ order.fulfillment_type === 'take_out' ? 'Take-Out (Packed)' : 'Dine-In (Tray)' }}
             </span>
 
+            <!-- Scheduled 15-min Pickup Slot -->
+            <span v-if="order.pickup_time" class="inline-flex items-center px-2.5 py-1 text-[10px] font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+              Pickup: {{ order.pickup_time }}
+            </span>
+
             <!-- Allergen Override Badge (Strict Lucide AlertTriangle without emojis) -->
             <span v-if="order.allergen_override" class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-300">
               <AlertTriangle class="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
@@ -60,7 +65,24 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-3 w-full md:w-auto mt-2 md:mt-0 flex-shrink-0">
+        <div class="flex flex-wrap items-center gap-3 w-full md:w-auto mt-2 md:mt-0 flex-shrink-0">
+          <!-- Take-Out Order Ready Notification -->
+          <template v-if="activeTab === 'Pending Pickup' && order.fulfillment_type === 'take_out'">
+            <span v-if="order.notification_status === 'ready_sent'" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-300">
+              <Check class="w-3.5 h-3.5 text-emerald-600" />
+              <span>Notification Sent</span>
+            </span>
+            <button 
+              v-else 
+              @click="notifyReady(order)" 
+              :disabled="isNotifyingId === order.id" 
+              class="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-lg font-bold text-xs shadow-sm transition-colors flex items-center justify-center gap-1.5 w-full md:w-auto"
+            >
+              <Bell class="w-3.5 h-3.5" />
+              <span>{{ isNotifyingId === order.id ? 'Sending...' : 'Notify Ready' }}</span>
+            </button>
+          </template>
+
           <button v-if="activeTab === 'Pending Pickup'" @click="refundOrder(order)" class="bg-rose-50 text-rose-600 border border-rose-200 px-4 py-2 rounded-lg font-bold text-sm hover:bg-rose-100 transition-colors w-full md:w-auto">
             Cancel & Refund
           </button>
@@ -133,13 +155,14 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { AlertTriangle } from 'lucide-vue-next'
+import { AlertTriangle, Check, Bell } from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
 
 const { sandboxOrders, sandboxMenu, activePreviewMode } = useSandbox()
 const activeTab = ref('Pending Pickup')
 const localOrders = ref([])
 const actionError = ref('')
+const isNotifyingId = ref(null)
 
 // Allergen Modal State
 const showAllergenModal = ref(false)
@@ -283,6 +306,34 @@ const refundOrder = (order) => {
 const calculateTotalItems = (items) => {
   if (!items || !Array.isArray(items)) return 0
   return items.reduce((total, item) => total + (Number(item.quantity) || 1), 0)
+}
+
+const notifyReady = async (order) => {
+  actionError.value = ''
+  if (isSandbox.value) {
+    order.notification_status = 'ready_sent'
+    return
+  }
+
+  isNotifyingId.value = order.id
+  try {
+    const res = await fetch('/api/vendor/orders/notify-ready', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: order.id })
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to dispatch notification.')
+    }
+
+    order.notification_status = 'ready_sent'
+  } catch (err) {
+    actionError.value = err.message || 'Failed to notify student.'
+  } finally {
+    isNotifyingId.value = null
+  }
 }
 
 const formatPreference = (pref) => {

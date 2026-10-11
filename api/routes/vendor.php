@@ -114,7 +114,7 @@ function handleGetOrders($pdo) {
     
     $stmt = $pdo->prepare("
         SELECT o.id, o.user_id, o.status, o.total_amount, o.claim_token, o.reserved_at,
-               o.fulfillment_type, o.handled_by, o.allergen_override, o.allergen_conflicts, u.name as customer_name
+               o.fulfillment_type, o.pickup_time, o.notification_status, o.handled_by, o.allergen_override, o.allergen_conflicts, u.name as customer_name
         FROM orders o
         JOIN users u ON o.user_id = u.id
         WHERE o.store_id = ? AND o.status IN ('reserved', 'paid', 'claimed')
@@ -210,6 +210,43 @@ function handleUpdateOrderStatus($pdo) {
         $pdo->rollBack();
         jsonResponse(['error' => $e->getMessage()], 400);
     }
+}
+
+function handleNotifyReady($pdo) {
+    $store_id = requireStaff($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (empty($input['order_id'])) {
+        jsonResponse(['error' => 'Missing order_id'], 400);
+    }
+
+    $order_id = (int)$input['order_id'];
+
+    $checkStmt = $pdo->prepare("SELECT id, status, fulfillment_type, notification_status FROM orders WHERE id = ? AND store_id = ?");
+    $checkStmt->execute([$order_id, $store_id]);
+    $order = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$order) {
+        jsonResponse(['error' => 'Order not found or does not belong to your store.'], 404);
+    }
+
+    if ($order['fulfillment_type'] !== 'take_out') {
+        jsonResponse(['error' => 'Ready notifications are only applicable to take-out orders.'], 400);
+    }
+
+    if (!in_array($order['status'], ['reserved', 'paid'], true)) {
+        jsonResponse(['error' => 'Order must be in reserved or paid status to send ready notification.'], 400);
+    }
+
+    $updateStmt = $pdo->prepare("UPDATE orders SET notification_status = 'ready_sent' WHERE id = ? AND store_id = ?");
+    $updateStmt->execute([$order_id, $store_id]);
+
+    jsonResponse([
+        'success' => true,
+        'message' => 'Order ready notification sent to student.',
+        'order_id' => $order_id,
+        'notification_status' => 'ready_sent'
+    ]);
 }
 
 function handleEnrichDish($pdo) {

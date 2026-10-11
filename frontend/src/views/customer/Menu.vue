@@ -446,7 +446,7 @@
 
         <div class="p-6 bg-slate-50 border-t border-slate-200 flex-shrink-0">
           <!-- Order Type -->
-          <div class="flex bg-slate-200/60 p-1.5 rounded-xl mb-6">
+          <div class="flex bg-slate-200/60 p-1.5 rounded-xl mb-4">
             <button @click="orderType = 'dine_in'" class="flex-1 flex justify-center items-center py-2.5 text-sm font-bold rounded-lg transition-all" :class="orderType === 'dine_in' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500 hover:text-slate-700'">
               <Utensils :size="16" class="mr-2" /> Dine-In (Tray)
             </button>
@@ -454,6 +454,37 @@
               <Package :size="16" class="mr-2" /> Take-Out (Packed)
             </button>
           </div>
+
+          <!-- Take-Out 15-min Pickup Slot Selector -->
+          <div v-if="orderType === 'take_out'" class="mb-5 p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold text-amber-900">
+              <span class="flex items-center gap-1.5">
+                <Clock :size="14" class="text-amber-600" />
+                Select Pickup Time Slot
+              </span>
+              <span class="text-[10px] uppercase font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                15-Min Intervals
+              </span>
+            </div>
+            
+            <div v-if="isLoadingSlots" class="text-xs text-slate-500 font-medium py-1">
+              Loading available slots...
+            </div>
+            <div v-else-if="pickupSlots.length === 0" class="text-xs text-rose-600 font-bold py-1">
+              No pickup slots available right now (closing soon or closed).
+            </div>
+            <select 
+              v-else 
+              v-model="selectedPickupSlot" 
+              class="w-full bg-white border border-amber-300 rounded-lg p-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option disabled value="">Choose your 15-minute pickup window</option>
+              <option v-for="slot in pickupSlots" :key="slot" :value="slot">
+                {{ slot }} (15-min window)
+              </option>
+            </select>
+          </div>
+
           <p class="text-[11px] text-slate-500 mb-6 italic text-center">*Reserves food portions; table seating is first-come, first-served.</p>
 
           <div class="flex justify-between items-center mb-2 text-sm font-medium text-slate-600">
@@ -566,8 +597,11 @@
               {{ takeoutConversionError }}
             </div>
           </div>
-          <div v-else class="mt-6 w-full text-center text-sm font-semibold text-emerald-100 bg-white/10 py-2 px-4 rounded-full border border-white/20">
-            Fulfillment: Take-Out (Packed)
+          <div v-else class="mt-6 w-full text-center text-sm font-semibold text-emerald-100 bg-white/10 py-2.5 px-4 rounded-xl border border-white/20 space-y-1">
+            <div>Fulfillment: Take-Out (Packed)</div>
+            <div v-if="confirmedPickupTime" class="text-xs font-bold text-white bg-white/20 py-1 px-3 rounded-full inline-block">
+              Scheduled Pickup: {{ confirmedPickupTime }}
+            </div>
           </div>
         </div>
 
@@ -684,12 +718,40 @@ const confirmationType = ref('express')
 const confirmedToken = ref('')
 const confirmedTotal = ref(0)
 const confirmedFulfillmentType = ref('dine_in')
+const confirmedPickupTime = ref('')
 const isConvertingTakeout = ref(false)
 const takeoutConversionError = ref('')
 const orderType = ref('dine_in')
+const pickupSlots = ref([])
+const selectedPickupSlot = ref('')
+const isLoadingSlots = ref(false)
 const limitWarning = ref('')
 const checkoutError = ref('')
 let limitWarningTimeout = null
+
+const fetchPickupSlots = async () => {
+  isLoadingSlots.value = true
+  try {
+    const res = await fetch('/api/customer/pickup-slots')
+    if (res.ok) {
+      const data = await res.json()
+      pickupSlots.value = data.slots || []
+      if (pickupSlots.value.length > 0 && !selectedPickupSlot.value) {
+        selectedPickupSlot.value = pickupSlots.value[0]
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch pickup slots:', e)
+  } finally {
+    isLoadingSlots.value = false
+  }
+}
+
+watch(orderType, (newType) => {
+  if (newType === 'take_out' && pickupSlots.value.length === 0) {
+    fetchPickupSlots()
+  }
+})
 
 const conflictModalOpen = ref(false)
 const activeDishConflicts = ref([])
@@ -1165,6 +1227,12 @@ const processOrder = async (type) => {
   checkoutError.value = ''
   const currentTotal = cartTotal.value
   confirmationType.value = type
+
+  // Validate pickup time slot if take out
+  if (orderType.value === 'take_out' && !selectedPickupSlot.value) {
+    checkoutError.value = 'Please select a pickup time slot for take-out orders.'
+    return
+  }
   
   try {
     if (isAdmin.value && activePreviewMode.value === 'customer') {
@@ -1174,15 +1242,19 @@ const processOrder = async (type) => {
         token,
         type,
         fulfillment_type: orderType.value,
+        pickup_time: selectedPickupSlot.value || null,
+        notification_status: 'none',
         total: currentTotal,
         is_sandbox: true,
         items: cart.value.map(c => ({...c}))
       })
       confirmedToken.value = token
+      confirmedPickupTime.value = selectedPickupSlot.value
     } else {
       const payload = {
         type: type,
         fulfillment_type: orderType.value,
+        pickup_time: orderType.value === 'take_out' ? selectedPickupSlot.value : null,
         allergen_override: Boolean(dangerAcknowledged.value),
         items: cart.value.map(c => ({
           menu_item_id: c.item.id,
@@ -1209,6 +1281,7 @@ const processOrder = async (type) => {
       
       const data = await res.json()
       confirmedToken.value = data.claim_token
+      confirmedPickupTime.value = orderType.value === 'take_out' ? selectedPickupSlot.value : ''
       
       // Update local menu items to reflect deducted stock
       await fetchMenu()

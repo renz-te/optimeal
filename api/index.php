@@ -121,12 +121,18 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/inventory' && $method === 'POST') {
     require 'routes/vendor.php';
     handlePostInventory($pdo);
+} elseif (($route === '/customer/pickup-slots' || $route === '/pickup-slots') && $method === 'GET') {
+    require 'routes/customer.php';
+    handleGetPickupSlots($pdo);
 } elseif ($route === '/vendor/orders' && $method === 'GET') {
     require 'routes/vendor.php';
     handleGetOrders($pdo);
 } elseif ($route === '/vendor/orders/update' && $method === 'POST') {
     require 'routes/vendor.php';
     handleUpdateOrderStatus($pdo);
+} elseif ($route === '/vendor/orders/notify-ready' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleNotifyReady($pdo);
 } elseif ($route === '/vendor/enrich-dish' && $method === 'POST') {
     require 'routes/vendor.php';
     handleEnrichDish($pdo);

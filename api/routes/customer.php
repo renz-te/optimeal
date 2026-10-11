@@ -53,6 +53,60 @@ function expireUnclaimedOrdersAfterClosing($pdo) {
     }
 }
 
+function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now') {
+    date_default_timezone_set('Asia/Manila');
+    $tz = new DateTimeZone('Asia/Manila');
+    
+    try {
+        $now = new DateTime($currentTimeStr, $tz);
+    } catch (Exception $e) {
+        $now = new DateTime('now', $tz);
+    }
+
+    $closingStr = !empty($closingTimeStr) ? trim($closingTimeStr) : '20:00';
+    $closing = new DateTime($now->format('Y-m-d') . ' ' . $closingStr, $tz);
+
+    // If current time is already at or past closing time today, return empty array
+    if ($now >= $closing) {
+        return [];
+    }
+
+    // Round up to the next 15-minute boundary
+    $currentMinutes = (int)$now->format('i');
+    $currentSeconds = (int)$now->format('s');
+    $remainder = $currentMinutes % 15;
+    
+    $minutesToAdd = (15 - $remainder);
+    if ($remainder === 0 && $currentSeconds === 0) {
+        $minutesToAdd = 15;
+    }
+
+    $slotTime = (clone $now)->modify("+{$minutesToAdd} minutes");
+    $slotTime->setTime((int)$slotTime->format('H'), (int)$slotTime->format('i'), 0);
+
+    $slots = [];
+    while ($slotTime <= $closing) {
+        $slots[] = $slotTime->format('H:i');
+        $slotTime->modify('+15 minutes');
+    }
+
+    return $slots;
+}
+
+function handleGetPickupSlots($pdo) {
+    date_default_timezone_set('Asia/Manila');
+    $settings = getCustomerSettings($pdo);
+    $closingTime = $settings['closing_time'] ?? '20:00';
+    
+    $slots = generatePickupSlots($closingTime, 'now');
+    
+    jsonResponse([
+        'closing_time' => $closingTime,
+        'current_time' => date('H:i'),
+        'slots' => $slots
+    ]);
+}
+
 function handleGetMenu($pdo) {
     date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
@@ -366,9 +420,30 @@ function handleCreateReservation($pdo) {
         $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
             ? $input['fulfillment_type'] 
             : 'dine_in';
+
+        $pickup_time = null;
+        if ($fulfillment_type === 'take_out') {
+            $pickup_time = !empty($input['pickup_time']) ? trim($input['pickup_time']) : null;
+            if (empty($pickup_time)) {
+                jsonResponse(['error' => 'Please select a pickup time slot for take-out orders.'], 400);
+            }
+            if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $pickup_time)) {
+                jsonResponse(['error' => 'Invalid pickup time format. Must be HH:MM.'], 400);
+            }
+        }
+
         $reservationTtl = isset($settings['reservation_ttl']) ? max(1, (int)$settings['reservation_ttl']) : 30;
-        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token, fulfillment_type, allergen_override, allergen_conflicts) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?, ?, ?)");
-        $insertOrder->execute([$user_id, $store_id, $reservationTtl, $claimToken, $fulfillment_type, $isAllergenOverride, $allergenConflictsJson]);
+        $insertOrder = $pdo->prepare("
+            INSERT INTO orders (
+                user_id, store_id, status, ttl_expires_at, claim_token, 
+                fulfillment_type, pickup_time, notification_status, 
+                allergen_override, allergen_conflicts
+            ) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?, ?, 'none', ?, ?)
+        ");
+        $insertOrder->execute([
+            $user_id, $store_id, $reservationTtl, $claimToken, 
+            $fulfillment_type, $pickup_time, $isAllergenOverride, $allergenConflictsJson
+        ]);
         $order_id = $pdo->lastInsertId();
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
@@ -498,7 +573,7 @@ function handlePayReservation($pdo, $order_id) {
 function handleGetCustomerOrders($pdo) {
     $user_id = requireCustomer($pdo);
     
-    $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, allergen_override, allergen_conflicts FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
+    $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, pickup_time, notification_status, allergen_override, allergen_conflicts FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
     $stmt->execute([$user_id]);
     jsonResponse($stmt->fetchAll());
 }
@@ -507,7 +582,7 @@ function handleGetMyOrders($pdo) {
     $user_id = requireCustomer($pdo);
 
     $stmt = $pdo->prepare("
-        SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, allergen_override, allergen_conflicts
+        SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, pickup_time, notification_status, allergen_override, allergen_conflicts
         FROM orders
         WHERE user_id = ?
         ORDER BY reserved_at DESC
