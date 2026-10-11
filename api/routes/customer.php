@@ -139,8 +139,11 @@ function handleCreateReservation($pdo) {
             $checkToken->execute([$store_id, $claimToken]);
         } while ($checkToken->fetchColumn());
         
-        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 30 MINUTE), ?)");
-        $insertOrder->execute([$user_id, $store_id, $claimToken]);
+        $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
+            ? $input['fulfillment_type'] 
+            : 'dine_in';
+        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token, fulfillment_type) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 30 MINUTE), ?, ?)");
+        $insertOrder->execute([$user_id, $store_id, $claimToken, $fulfillment_type]);
         $order_id = $pdo->lastInsertId();
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
@@ -254,7 +257,29 @@ function handlePayReservation($pdo, $order_id) {
 function handleGetCustomerOrders($pdo) {
     $user_id = requireCustomer($pdo);
     
-    $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
+    $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
     $stmt->execute([$user_id]);
     jsonResponse($stmt->fetchAll());
+}
+
+function handleUpdateFulfillment($pdo) {
+    $user_id = requireCustomer($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (empty($input['token']) || empty($input['fulfillment_type'])) {
+        jsonResponse(['error' => 'Missing token or fulfillment_type'], 400);
+    }
+
+    $fulfillment_type = in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
+        ? $input['fulfillment_type'] 
+        : 'dine_in';
+
+    $stmt = $pdo->prepare("UPDATE orders SET fulfillment_type = ? WHERE claim_token = ? AND user_id = ?");
+    $stmt->execute([$fulfillment_type, $input['token'], $user_id]);
+
+    if ($stmt->rowCount() === 0) {
+        jsonResponse(['error' => 'Order not found or unauthorized'], 404);
+    }
+
+    jsonResponse(['message' => 'Fulfillment type updated successfully']);
 }

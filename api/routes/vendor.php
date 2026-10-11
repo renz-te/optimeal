@@ -109,7 +109,7 @@ function handleGetOrders($pdo) {
     
     $stmt = $pdo->prepare("
         SELECT o.id, o.user_id, o.status, o.total_amount, o.claim_token, o.reserved_at,
-               u.name as customer_name
+               o.fulfillment_type, u.name as customer_name
         FROM orders o
         JOIN users u ON o.user_id = u.id
         WHERE o.store_id = ? AND o.status IN ('reserved', 'paid', 'claimed')

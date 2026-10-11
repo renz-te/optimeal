@@ -54,6 +54,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif (preg_match('#^/reservations/(\d+)/pay$#', $route, $matches) && $method === 'POST') {
     require 'routes/customer.php';
     handlePayReservation($pdo, $matches[1]);
+} elseif ($route === '/reservations/update-fulfillment' && $method === 'POST') {
+    require 'routes/customer.php';
+    handleUpdateFulfillment($pdo);
 } elseif ($route === '/orders' && $method === 'GET') {
     require 'routes/customer.php';
     handleGetCustomerOrders($pdo);
