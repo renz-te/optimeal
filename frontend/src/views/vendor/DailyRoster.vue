@@ -5,10 +5,49 @@
         <h2 class="text-3xl font-black text-slate-900 tracking-tight">Launch Daily Lineup</h2>
         <p class="text-slate-500 font-medium mt-1">Select dishes from the master catalog, set stock and pricing, and publish today's menu.</p>
       </div>
-      <button @click="showCustomModal = true" class="flex items-center space-x-2 bg-slate-900 text-white px-5 py-2.5 rounded-lg font-bold shadow-md hover:bg-slate-800 transition-colors">
-        <Plus :size="18" />
-        <span>Add Custom Viand</span>
-      </button>
+      <div class="flex items-center gap-3">
+        <button @click="openPrepListModal" class="flex items-center space-x-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg font-bold hover:bg-emerald-100 transition-colors">
+          <ClipboardList :size="18" />
+          <span>Prep Plan ({{ prepPlanData.prep_list?.length || 0 }})</span>
+        </button>
+        <button @click="showCustomModal = true" class="flex items-center space-x-2 bg-slate-900 text-white px-5 py-2.5 rounded-lg font-bold shadow-md hover:bg-slate-800 transition-colors">
+          <Plus :size="18" />
+          <span>Add Custom Viand</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Planned Batch Servings Slider -->
+    <div class="bg-white border border-slate-200 shadow-sm rounded-xl p-5 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <h3 class="text-base font-bold text-slate-900">Planned Batch Servings</h3>
+          <span class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+            {{ batchPlannedServings }} portions
+          </span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Scale kitchen prep list requirements dynamically across selected dishes.</p>
+      </div>
+      <div class="flex items-center gap-3 w-full md:w-auto">
+        <span class="text-xs font-bold text-slate-400">10</span>
+        <input 
+          type="range" 
+          min="10" 
+          max="200" 
+          step="5" 
+          v-model.number="batchPlannedServings" 
+          @input="onServingsSliderInput"
+          class="w-full md:w-56 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+        />
+        <span class="text-xs font-bold text-slate-400">200</span>
+        <button 
+          @click="openPrepListModal"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all whitespace-nowrap"
+        >
+          <ClipboardList :size="14" />
+          <span>View Prep List ({{ prepPlanData.prep_list?.length || 0 }})</span>
+        </button>
+      </div>
     </div>
 
     <!-- Roster Table -->
@@ -49,9 +88,14 @@
                 </div>
               </td>
               <td class="px-6 py-4 text-center">
-                <button @click="openEditModal(item)" class="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded hover:bg-indigo-50">
-                  <Edit2 :size="16" />
-                </button>
+                <div class="flex items-center justify-center gap-1">
+                  <button @click="openRecipeModal(item)" title="Recipe & Prep Ingredients" class="text-slate-400 hover:text-emerald-600 transition-colors p-1.5 rounded hover:bg-emerald-50">
+                    <Utensils :size="16" />
+                  </button>
+                  <button @click="openEditModal(item)" title="Edit Dish Details" class="text-slate-400 hover:text-indigo-600 transition-colors p-1.5 rounded hover:bg-indigo-50">
+                    <Edit2 :size="16" />
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -257,6 +301,224 @@
         </div>
     </transition>
 
+    <!-- Recipe Modal -->
+    <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="showRecipeModal" class="fixed inset-0 bg-slate-900/60 z-40 backdrop-blur-sm" @click="closeRecipeModal"></div>
+    </transition>
+
+    <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
+      <div v-if="showRecipeModal" class="fixed bottom-0 right-0 top-0 z-50 w-full max-w-xl bg-white shadow-2xl flex flex-col overflow-hidden">
+        <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-xl font-black text-slate-900">Recipe: {{ recipeDish?.name }}</h3>
+              <span class="text-xs font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded">{{ recipeDish?.category }}</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Configure batch ingredients, quantities, and verify live allergen mappings.</p>
+          </div>
+          <button @click="closeRecipeModal" class="text-slate-400 hover:text-slate-700 transition-colors"><X :size="20" /></button>
+        </div>
+
+        <div class="p-6 flex-1 overflow-y-auto space-y-6">
+          <div class="flex items-center justify-between gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Batch Yield Servings</label>
+              <input type="number" v-model.number="recipeForm.yield_servings" min="1" class="w-24 px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-slate-900 outline-none focus:border-emerald-500" />
+            </div>
+
+            <button 
+              @click="suggestRecipe" 
+              :disabled="isSuggestingRecipe"
+              class="text-xs font-bold bg-indigo-50 text-indigo-600 px-3.5 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Sparkles :size="14" :class="{'animate-spin': isSuggestingRecipe}" />
+              <span>{{ isSuggestingRecipe ? 'Consulting AI...' : 'Suggest Recipe (AI)' }}</span>
+            </button>
+          </div>
+
+          <!-- Live Allergen Preview -->
+          <div class="p-4 rounded-xl border" :class="recipeForm.allergens.length > 0 ? 'bg-rose-50/50 border-rose-200' : 'bg-emerald-50/40 border-emerald-200'">
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-xs font-black uppercase tracking-wider" :class="recipeForm.allergens.length > 0 ? 'text-rose-800' : 'text-emerald-800'">
+                Live Allergen & Dietary Preview
+              </h4>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full" :class="recipeForm.allergens.length > 0 ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'">
+                {{ recipeForm.allergens.length > 0 ? `${recipeForm.allergens.length} Allergens Detected` : 'Allergen Safe' }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <span 
+                v-for="allg in recipeForm.allergens" 
+                :key="allg" 
+                class="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200"
+              >
+                <AlertTriangle :size="12" />
+                {{ allg }}
+              </span>
+              <span v-if="recipeForm.allergens.length === 0" class="text-xs text-emerald-700 font-medium">
+                No critical allergens matched in current ingredient list.
+              </span>
+            </div>
+
+            <div v-if="recipeForm.has_unmapped" class="mt-3 pt-2.5 border-t border-amber-200/60 flex items-center gap-2 text-xs font-semibold text-amber-800">
+              <AlertTriangle :size="14" class="text-amber-600 shrink-0" />
+              <span>Some ingredients are unmapped in the admin taxonomy and won't trigger allergen alerts.</span>
+            </div>
+          </div>
+
+          <!-- Ingredients List -->
+          <div>
+            <div class="flex justify-between items-center mb-2">
+              <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Recipe Ingredients</label>
+              <button @click="addRecipeIngredientRow" class="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
+                <Plus :size="14" />
+                <span>Add Ingredient</span>
+              </button>
+            </div>
+
+            <div class="space-y-2">
+              <div v-for="(ing, idx) in recipeForm.ingredients" :key="idx" class="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <input 
+                  type="text" 
+                  v-model="ing.name" 
+                  @input="onIngredientNameChange"
+                  placeholder="Ingredient name (e.g. Garlic, Chicken Thigh)" 
+                  class="flex-1 px-3 py-1.5 border border-slate-300 rounded font-medium text-sm outline-none focus:border-emerald-500" 
+                />
+                <input 
+                  type="number" 
+                  step="0.1" 
+                  min="0.1" 
+                  v-model.number="ing.quantity" 
+                  class="w-20 px-2 py-1.5 border border-slate-300 rounded font-bold text-sm outline-none focus:border-emerald-500" 
+                />
+                <select 
+                  v-model="ing.unit" 
+                  class="w-20 px-2 py-1.5 border border-slate-300 rounded font-semibold text-xs bg-white outline-none focus:border-emerald-500"
+                >
+                  <option value="g">g</option>
+                  <option value="kg">kg</option>
+                  <option value="ml">ml</option>
+                  <option value="l">l</option>
+                  <option value="pc">pc</option>
+                  <option value="tbsp">tbsp</option>
+                  <option value="tsp">tsp</option>
+                  <option value="cup">cup</option>
+                </select>
+                <button @click="removeRecipeIngredientRow(idx)" class="text-slate-400 hover:text-rose-600 p-1">
+                  <Trash2 :size="16" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Preparation & Cooking Notes</label>
+            <textarea 
+              v-model="recipeForm.instructions" 
+              rows="3" 
+              placeholder="Optional prep steps, simmer times, batch handling notes..."
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:border-emerald-500 resize-none font-normal"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="p-6 border-t border-slate-100 bg-slate-50 flex justify-end space-x-3">
+          <button @click="closeRecipeModal" class="px-5 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+          <button @click="saveRecipe" :disabled="isSavingRecipe" class="px-5 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-md hover:bg-emerald-700 transition-colors disabled:opacity-50">
+            {{ isSavingRecipe ? 'Saving...' : 'Save Recipe' }}
+          </button>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Consolidated Prep Plan Modal -->
+    <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="showPrepModal" class="fixed inset-0 bg-slate-900/60 z-40 backdrop-blur-sm" @click="showPrepModal = false"></div>
+    </transition>
+
+    <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
+      <div v-if="showPrepModal" class="fixed bottom-0 right-0 top-0 z-50 w-full max-w-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
+        <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-xl font-black text-slate-900">Consolidated Kitchen Prep Plan</h3>
+              <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">{{ prepPlanData.total_servings || 0 }} portions</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Aggregated raw inventory requirements scaled for today's selected lineup.</p>
+          </div>
+          <button @click="showPrepModal = false" class="text-slate-400 hover:text-slate-700 transition-colors"><X :size="20" /></button>
+        </div>
+
+        <div class="p-6 flex-1 overflow-y-auto space-y-6">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+              <div class="text-[11px] font-bold text-slate-400 uppercase">Selected Viands</div>
+              <div class="text-xl font-black text-slate-900 mt-1">{{ prepPlanData.total_dishes || 0 }} dishes</div>
+            </div>
+            <div class="bg-emerald-50/50 p-3.5 rounded-xl border border-emerald-200">
+              <div class="text-[11px] font-bold text-emerald-600 uppercase">Planned Servings</div>
+              <div class="text-xl font-black text-emerald-800 mt-1">{{ prepPlanData.total_servings || 0 }} portions</div>
+            </div>
+            <div class="bg-indigo-50/50 p-3.5 rounded-xl border border-indigo-200">
+              <div class="text-[11px] font-bold text-indigo-600 uppercase">Total Ingredients</div>
+              <div class="text-xl font-black text-indigo-800 mt-1">{{ prepPlanData.prep_list?.length || 0 }} items</div>
+            </div>
+          </div>
+
+          <div class="border border-slate-200 rounded-xl overflow-hidden">
+            <table class="w-full text-left text-sm whitespace-nowrap">
+              <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase tracking-wider">
+                <tr>
+                  <th class="px-4 py-3">Ingredient</th>
+                  <th class="px-4 py-3 text-right">Required Quantity</th>
+                  <th class="px-4 py-3">Used In Dishes</th>
+                  <th class="px-4 py-3 text-center">Taxonomy</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-if="!prepPlanData.prep_list || prepPlanData.prep_list.length === 0">
+                  <td colspan="4" class="text-center py-8 text-slate-400 font-medium">
+                    No ingredients in prep plan. Select dishes or add recipes to see requirements.
+                  </td>
+                </tr>
+                <tr v-for="item in prepPlanData.prep_list" :key="item.name + item.dimension" class="hover:bg-slate-50/50">
+                  <td class="px-4 py-3 font-bold text-slate-900">
+                    {{ item.name }}
+                  </td>
+                  <td class="px-4 py-3 text-right font-black text-emerald-700">
+                    {{ item.total_quantity }} {{ item.unit }}
+                  </td>
+                  <td class="px-4 py-3 text-xs text-slate-600">
+                    <div class="flex flex-wrap gap-1">
+                      <span v-for="d in item.used_in_dishes" :key="d" class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                        {{ d }}
+                      </span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <span v-if="item.is_unmapped" class="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                      <AlertTriangle :size="10" />
+                      Unmapped
+                    </span>
+                    <span v-else class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Mapped
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="p-6 border-t border-slate-100 bg-slate-50 flex justify-end">
+          <button @click="showPrepModal = false" class="px-5 py-2 bg-slate-900 text-white font-bold rounded-lg shadow hover:bg-slate-800 transition-colors">
+            Close Prep Plan
+          </button>
+        </div>
+      </div>
+    </transition>
+
     <transition
       enter-active-class="transform ease-out duration-300 transition"
       enter-from-class="translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2"
@@ -279,7 +541,7 @@
 
 <script setup>
 import { ref, onMounted, reactive, watch } from 'vue'
-import { Plus, Edit2, X } from 'lucide-vue-next'
+import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useCatalog } from '../../stores/dishCatalog'
 import { useSandbox } from '../../stores/sandbox'
@@ -295,6 +557,25 @@ const showCustomModal = ref(false)
 const editItem = ref(null)
 const newCustomAllergen = ref('')
 const launchState = ref('idle')
+
+// Phase D2: Recipe & Kitchen Prep State
+const batchPlannedServings = ref(30)
+const showPrepModal = ref(false)
+const showRecipeModal = ref(false)
+const recipeDish = ref(null)
+const isSuggestingRecipe = ref(false)
+const isSavingRecipe = ref(false)
+const prepPlanData = ref({ total_dishes: 0, total_servings: 0, dishes: [], prep_list: [] })
+let debounceTimer = null
+
+const recipeForm = reactive({
+  yield_servings: 10,
+  instructions: '',
+  ingredients: [],
+  allergens: [],
+  sensitivities: [],
+  has_unmapped: false
+})
 
 const formatDateTimeLocal = (date) => {
   const pad = (n) => String(n).padStart(2, '0')
@@ -412,6 +693,7 @@ const initRoster = () => {
       current_price: dish.current_price !== undefined ? dish.current_price : dish.base_price,
     }
   })
+  fetchPrepPlan()
 }
 
 onMounted(() => {
@@ -421,6 +703,214 @@ onMounted(() => {
 watch(masterCatalog, () => {
   initRoster()
 }, { deep: true })
+
+// Watch roster selections to update prep plan
+watch(() => activeRoster.value.map(r => r.selected), () => {
+  fetchPrepPlan()
+}, { deep: true })
+
+const onServingsSliderInput = () => {
+  // Update local state instantly
+  const selectedCount = activeRoster.value.filter(r => r.selected).length || 1
+  const perDish = Math.max(1, Math.round(batchPlannedServings.value / selectedCount))
+  activeRoster.value.forEach(item => {
+    if (item.selected) {
+      item.stock = perDish
+    }
+  })
+
+  // Debounced API call to /api/vendor/prep-plan
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    fetchPrepPlan()
+  }, 350)
+}
+
+const fetchPrepPlan = async () => {
+  const selectedItems = activeRoster.value.filter(r => r.selected)
+  if (selectedItems.length === 0) {
+    prepPlanData.value = { total_dishes: 0, total_servings: 0, dishes: [], prep_list: [] }
+    return
+  }
+  try {
+    const payload = {
+      items: selectedItems.map(i => ({
+        menu_item_id: i.id,
+        servings: i.stock || 10
+      }))
+    }
+    const res = await fetch('/api/vendor/prep-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (res.ok) {
+      prepPlanData.value = await res.json()
+    }
+  } catch (err) {
+    console.error('Failed to fetch prep plan', err)
+  }
+}
+
+const openPrepListModal = () => {
+  fetchPrepPlan()
+  showPrepModal.value = true
+}
+
+const openRecipeModal = async (item) => {
+  recipeDish.value = item
+  recipeForm.yield_servings = 10
+  recipeForm.instructions = ''
+  recipeForm.ingredients = []
+  recipeForm.allergens = []
+  recipeForm.sensitivities = []
+  recipeForm.has_unmapped = false
+  showRecipeModal.value = true
+
+  try {
+    const res = await fetch(`/api/vendor/dish/recipe?menu_item_id=${item.id}`)
+    if (res.ok) {
+      const data = await res.json()
+      recipeForm.yield_servings = data.yield_servings || 10
+      recipeForm.instructions = data.instructions || ''
+      recipeForm.ingredients = (data.ingredients || []).map(i => ({
+        name: i.name,
+        quantity: i.quantity,
+        unit: i.unit,
+        is_unmapped: i.is_unmapped
+      }))
+      recipeForm.allergens = data.allergens || []
+      recipeForm.sensitivities = data.sensitivities || []
+      recipeForm.has_unmapped = data.has_unmapped || false
+    }
+  } catch (err) {
+    console.error('Failed to fetch recipe', err)
+  }
+}
+
+const closeRecipeModal = () => {
+  showRecipeModal.value = false
+  recipeDish.value = null
+}
+
+const addRecipeIngredientRow = () => {
+  recipeForm.ingredients.push({
+    name: '',
+    quantity: 100,
+    unit: 'g',
+    is_unmapped: false
+  })
+}
+
+const removeRecipeIngredientRow = (idx) => {
+  recipeForm.ingredients.splice(idx, 1)
+  updateAllergenPreview()
+}
+
+const updateAllergenPreview = () => {
+  const detected = []
+  let unmapped = false
+  const taxItems = masterTaxonomy.value || []
+  recipeForm.ingredients.forEach(ing => {
+    const name = (ing.name || '').trim().toLowerCase()
+    if (!name) return
+    const match = taxItems.find(t => t.name.toLowerCase() === name)
+    if (match) {
+      if (match.allergens && Array.isArray(match.allergens)) {
+        detected.push(...match.allergens)
+      }
+    } else {
+      unmapped = true
+    }
+  })
+  recipeForm.allergens = Array.from(new Set(detected))
+  recipeForm.has_unmapped = unmapped
+}
+
+const onIngredientNameChange = () => {
+  updateAllergenPreview()
+}
+
+const suggestRecipe = async () => {
+  if (!recipeDish.value) return
+  isSuggestingRecipe.value = true
+  try {
+    const res = await fetch('/api/vendor/dish/recipe/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dish_name: recipeDish.value.name,
+        menu_item_id: recipeDish.value.id
+      })
+    })
+
+    const data = await res.json()
+
+    if (res.status === 403) {
+      showToast(data.error || 'AI Recipe Generation is currently disabled by Administrator.', 'error')
+      return
+    }
+
+    if (!res.ok || data.fallback || !data.data) {
+      showToast(data.error || 'AI suggestion unavailable. Please enter ingredients manually.', 'error')
+      return
+    }
+
+    const suggestion = data.data
+    recipeForm.yield_servings = suggestion.yield_servings || 10
+    recipeForm.instructions = suggestion.instructions || recipeForm.instructions
+    recipeForm.ingredients = (suggestion.ingredients || []).map(i => ({
+      name: i.name,
+      quantity: i.quantity,
+      unit: i.unit || 'g',
+      is_unmapped: false
+    }))
+    updateAllergenPreview()
+    showToast('Recipe suggested by AI! Review ingredients and click Save Recipe.', 'success')
+  } catch (err) {
+    showToast('AI suggestion unavailable. Please enter ingredients manually.', 'error')
+  } finally {
+    isSuggestingRecipe.value = false
+  }
+}
+
+const saveRecipe = async () => {
+  if (!recipeDish.value) return
+  if (recipeForm.ingredients.length === 0) {
+    showToast('Please add at least one ingredient.', 'error')
+    return
+  }
+
+  isSavingRecipe.value = true
+  try {
+    const payload = {
+      menu_item_id: recipeDish.value.id,
+      yield_servings: recipeForm.yield_servings,
+      instructions: recipeForm.instructions,
+      ingredients: recipeForm.ingredients
+    }
+    const res = await fetch('/api/vendor/dish/recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      showToast(data.error || 'Failed to save recipe.', 'error')
+      return
+    }
+
+    showToast('Recipe saved successfully!', 'success')
+    recipeForm.allergens = data.allergens_preview || []
+    recipeForm.has_unmapped = data.has_unmapped || false
+    closeRecipeModal()
+    fetchPrepPlan()
+  } catch (err) {
+    showToast(`Network error: ${err.message}`, 'error')
+  } finally {
+    isSavingRecipe.value = false
+  }
+}
 
 const openEditModal = (item) => {
   editItem.value = item

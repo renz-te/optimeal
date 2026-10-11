@@ -19,7 +19,7 @@
         :disabled="isLoading"
         class="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 font-bold rounded-xl shadow-sm hover:shadow transition-all text-sm disabled:opacity-50"
       >
-        <span :class="{'animate-spin': isLoading}">🔄</span>
+        <RefreshCw class="w-4 h-4" :class="{'animate-spin': isLoading}" />
         <span>{{ isLoading ? 'Refreshing...' : 'Refresh Audit' }}</span>
       </button>
     </div>
@@ -27,7 +27,7 @@
     <!-- Error Banner -->
     <div v-if="errorMessage" class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-sm flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <span>⚠️</span>
+        <AlertTriangle class="w-4 h-4 text-rose-600 shrink-0" />
         <span class="font-medium">{{ errorMessage }}</span>
       </div>
       <button @click="errorMessage = ''" class="text-rose-500 hover:text-rose-700 font-bold text-xs">Dismiss</button>
@@ -45,7 +45,7 @@
             </h2>
           </div>
           <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-lg">
-            💰
+            <DollarSign class="w-5 h-5 text-emerald-600" />
           </div>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
@@ -66,7 +66,7 @@
             </h2>
           </div>
           <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
-            📦
+            <Package class="w-5 h-5 text-indigo-600" />
           </div>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
@@ -87,7 +87,7 @@
             </h2>
           </div>
           <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-lg">
-            🚫
+            <Ban class="w-5 h-5 text-rose-600" />
           </div>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
@@ -108,7 +108,7 @@
             </h2>
           </div>
           <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg">
-            ⚖️
+            <Scale class="w-5 h-5 text-amber-600" />
           </div>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-xs font-semibold text-slate-500">
@@ -184,13 +184,15 @@
                   v-if="item.status === 'On sale'" 
                   class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"
                 >
-                  ✓ On sale
+                  <Check class="w-3.5 h-3.5 mr-1 text-emerald-700" />
+                  On sale
                 </span>
                 <span 
                   v-else-if="item.status === 'Expired / closed'" 
                   class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700 border border-rose-200"
                 >
-                  ⚠️ Expired / closed
+                  <AlertTriangle class="w-3.5 h-3.5 mr-1 text-rose-600" />
+                  Expired / closed
                 </span>
                 <span 
                   v-else 
@@ -256,9 +258,10 @@
               <td class="px-6 py-4 text-center">
                 <span 
                   v-if="order.status === 'claimed'" 
-                  class="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200"
+                  class="inline-flex items-center px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200"
                 >
-                  ✓ Claimed
+                  <Check class="w-3.5 h-3.5 mr-1 text-emerald-700" />
+                  Claimed
                 </span>
                 <span 
                   v-else-if="order.status === 'paid'" 
@@ -298,6 +301,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { AlertTriangle, Check, RefreshCw, DollarSign, Package, Ban, Scale } from 'lucide-vue-next'
 
 const isLoading = ref(false)
 const errorMessage = ref('')

@@ -1,15 +1,20 @@
 <?php
 function requireVendor($pdo) {
-    $session = requireRole($pdo, ['vendor']);
+    $session = requireRole($pdo, ['vendor', 'admin']);
     
     // Resolve vendor's store
     $stmt = $pdo->prepare("SELECT id FROM stores WHERE vendor_user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     $store = $stmt->fetch();
     if (!$store) {
+        $stmtActive = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
+        $storeId = $stmtActive->fetchColumn();
+        if ($storeId) {
+            return (int)$storeId;
+        }
         jsonResponse(['error' => 'Vendor does not have a store configured'], 400);
     }
-    return $store['id'];
+    return (int)$store['id'];
 }
 
 function handleGetPricingRules($pdo) {
@@ -870,3 +875,565 @@ function handleGetDailyAudit($pdo) {
         'orders' => $recentOrders
     ]);
 }
+
+function handleGetRecipe($pdo) {
+    $store_id = requireVendor($pdo);
+    $menu_item_id = isset($_GET['menu_item_id']) ? (int)$_GET['menu_item_id'] : 0;
+    if ($menu_item_id <= 0) {
+        jsonResponse(['error' => 'Missing or invalid menu_item_id'], 400);
+    }
+
+    $stmtDish = $pdo->prepare("SELECT id, name, base_price, category FROM menu_items WHERE id = ? AND store_id = ?");
+    $stmtDish->execute([$menu_item_id, $store_id]);
+    $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
+    if (!$dish) {
+        jsonResponse(['error' => 'Dish not found or does not belong to your store'], 404);
+    }
+
+    $stmtRecipe = $pdo->prepare("SELECT * FROM recipes WHERE menu_item_id = ?");
+    $stmtRecipe->execute([$menu_item_id]);
+    $recipe = $stmtRecipe->fetch(PDO::FETCH_ASSOC);
+
+    if (!$recipe) {
+        jsonResponse([
+            'exists' => false,
+            'menu_item_id' => $menu_item_id,
+            'dish_name' => $dish['name'],
+            'yield_servings' => 1,
+            'instructions' => '',
+            'ingredients' => [],
+            'allergens' => [],
+            'sensitivities' => [],
+            'has_unmapped' => false
+        ]);
+    }
+
+    $stmtIng = $pdo->prepare("
+        SELECT ri.id, ri.ingredient_id, ri.ingredient_name, ri.quantity, ri.unit,
+               i.name as canonical_name
+        FROM recipe_ingredients ri
+        LEFT JOIN ingredients i ON ri.ingredient_id = i.id
+        WHERE ri.recipe_id = ?
+        ORDER BY ri.id ASC
+    ");
+    $stmtIng->execute([$recipe['id']]);
+    $rawIngredients = $stmtIng->fetchAll(PDO::FETCH_ASSOC);
+
+    $ingredients = [];
+    $hasUnmapped = false;
+    $ingredientIds = [];
+
+    foreach ($rawIngredients as $ri) {
+        $isUnmapped = empty($ri['ingredient_id']);
+        if ($isUnmapped) {
+            $hasUnmapped = true;
+        } else {
+            $ingredientIds[] = (int)$ri['ingredient_id'];
+        }
+        $ingredients[] = [
+            'id' => (int)$ri['id'],
+            'ingredient_id' => $ri['ingredient_id'] ? (int)$ri['ingredient_id'] : null,
+            'name' => $ri['ingredient_name'],
+            'quantity' => (float)$ri['quantity'],
+            'unit' => $ri['unit'],
+            'is_unmapped' => $isUnmapped
+        ];
+    }
+
+    $allergens = [];
+    if (!empty($ingredientIds)) {
+        $inClause = implode(',', array_fill(0, count($ingredientIds), '?'));
+        $stmtAllergens = $pdo->prepare("
+            SELECT DISTINCT ca.name 
+            FROM ingredient_allergen_map iam
+            JOIN critical_allergens ca ON iam.allergen_id = ca.id
+            WHERE iam.ingredient_id IN ($inClause)
+            ORDER BY ca.name ASC
+        ");
+        $stmtAllergens->execute($ingredientIds);
+        $allergens = $stmtAllergens->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    $stmtSens = $pdo->prepare("
+        SELECT DISTINCT ds.name
+        FROM menu_item_digestive_sensitivities mids
+        JOIN digestive_sensitivities ds ON mids.sensitivity_id = ds.id
+        WHERE mids.menu_item_id = ?
+        ORDER BY ds.name ASC
+    ");
+    $stmtSens->execute([$menu_item_id]);
+    $sensitivities = $stmtSens->fetchAll(PDO::FETCH_COLUMN);
+
+    jsonResponse([
+        'exists' => true,
+        'id' => (int)$recipe['id'],
+        'menu_item_id' => $menu_item_id,
+        'dish_name' => $dish['name'],
+        'yield_servings' => (int)$recipe['yield_servings'],
+        'instructions' => $recipe['instructions'] ?? '',
+        'ingredients' => $ingredients,
+        'allergens' => $allergens,
+        'sensitivities' => $sensitivities,
+        'has_unmapped' => $hasUnmapped
+    ]);
+}
+
+function handleSaveRecipe($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (empty($input['menu_item_id'])) {
+        jsonResponse(['error' => 'Missing menu_item_id'], 400);
+    }
+    $menu_item_id = (int)$input['menu_item_id'];
+    $yield_servings = max(1, (int)($input['yield_servings'] ?? 1));
+    $instructions = isset($input['instructions']) ? trim($input['instructions']) : '';
+    $rawIngredients = isset($input['ingredients']) && is_array($input['ingredients']) ? $input['ingredients'] : [];
+
+    $stmtDish = $pdo->prepare("SELECT id, name FROM menu_items WHERE id = ? AND store_id = ?");
+    $stmtDish->execute([$menu_item_id, $store_id]);
+    $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
+    if (!$dish) {
+        jsonResponse(['error' => 'Dish not found or does not belong to your store'], 403);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmtRecipe = $pdo->prepare("
+            INSERT INTO recipes (menu_item_id, yield_servings, instructions)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                yield_servings = VALUES(yield_servings),
+                instructions = VALUES(instructions)
+        ");
+        $stmtRecipe->execute([$menu_item_id, $yield_servings, $instructions]);
+
+        $stmtGetId = $pdo->prepare("SELECT id FROM recipes WHERE menu_item_id = ?");
+        $stmtGetId->execute([$menu_item_id]);
+        $recipeId = (int)$stmtGetId->fetchColumn();
+
+        $pdo->prepare("DELETE FROM recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
+        $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$menu_item_id]);
+
+        $savedIngredients = [];
+        $mappedIngredientIds = [];
+        $hasUnmapped = false;
+
+        $insertIng = $pdo->prepare("
+            INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        $insertMenuItemIng = $pdo->prepare("
+            INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id)
+            VALUES (?, ?)
+        ");
+
+        foreach ($rawIngredients as $ing) {
+            $ingName = trim($ing['name'] ?? '');
+            if ($ingName === '') continue;
+            $qty = (float)($ing['quantity'] ?? 0);
+            $unit = trim($ing['unit'] ?? 'g');
+
+            $stmtTax = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+            $stmtTax->execute([$ingName]);
+            $taxId = $stmtTax->fetchColumn();
+
+            $ingredientId = $taxId ? (int)$taxId : null;
+            if ($ingredientId) {
+                $mappedIngredientIds[] = $ingredientId;
+                $insertMenuItemIng->execute([$menu_item_id, $ingredientId]);
+            } else {
+                $hasUnmapped = true;
+            }
+
+            $insertIng->execute([$recipeId, $ingredientId, $ingName, $qty, $unit]);
+            $savedIngredients[] = [
+                'name' => $ingName,
+                'quantity' => $qty,
+                'unit' => $unit,
+                'ingredient_id' => $ingredientId,
+                'is_unmapped' => ($ingredientId === null)
+            ];
+        }
+
+        $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$menu_item_id]);
+        $detectedAllergens = [];
+
+        if (!empty($mappedIngredientIds)) {
+            $inClause = implode(',', array_fill(0, count($mappedIngredientIds), '?'));
+            $stmtAllergens = $pdo->prepare("
+                SELECT DISTINCT ca.id, ca.name 
+                FROM ingredient_allergen_map iam
+                JOIN critical_allergens ca ON iam.allergen_id = ca.id
+                WHERE iam.ingredient_id IN ($inClause)
+                ORDER BY ca.name ASC
+            ");
+            $stmtAllergens->execute($mappedIngredientIds);
+            $allergensList = $stmtAllergens->fetchAll(PDO::FETCH_ASSOC);
+
+            $insAllergen = $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)");
+            foreach ($allergensList as $al) {
+                $insAllergen->execute([$menu_item_id, $al['id']]);
+                $detectedAllergens[] = $al['name'];
+            }
+        }
+
+        $pdo->commit();
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Recipe saved successfully',
+            'recipe_id' => $recipeId,
+            'menu_item_id' => $menu_item_id,
+            'yield_servings' => $yield_servings,
+            'ingredients' => $savedIngredients,
+            'allergens_preview' => array_values(array_unique($detectedAllergens)),
+            'has_unmapped' => $hasUnmapped
+        ], 200);
+
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        jsonResponse(['error' => 'Failed to save recipe: ' . $e->getMessage()], 500);
+    }
+}
+
+function handleSuggestRecipe($pdo) {
+    $session = requireRole($pdo, ['vendor', 'admin']);
+
+    $stmt = $pdo->query("SELECT ai_enabled FROM settings WHERE id = 1");
+    $aiEnabled = (int)($stmt->fetchColumn() ?? 1);
+    if ($aiEnabled === 0) {
+        jsonResponse([
+            'error' => 'AI Recipe Generation is currently disabled by Administrator.',
+            'fallback' => true,
+            'ai_disabled' => true
+        ], 403);
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    $dishName = trim($input['name'] ?? $input['dish_name'] ?? '');
+    if ($dishName === '') {
+        jsonResponse(['error' => 'Missing dish name for recipe suggestion', 'fallback' => true], 400);
+    }
+
+    $sanitized = strtolower($dishName);
+    $md5Hash = md5($sanitized);
+    $cacheKeys = [
+        'recipe_' . $md5Hash,
+        md5('recipe:' . $sanitized),
+        $md5Hash,
+        'recipe:' . $md5Hash,
+        'recipe:' . $sanitized,
+        $sanitized
+    ];
+
+    $inClause = implode(',', array_fill(0, count($cacheKeys), '?'));
+    $stmtCache = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name IN ($inClause) LIMIT 1");
+    $stmtCache->execute($cacheKeys);
+    $cached = $stmtCache->fetch(PDO::FETCH_ASSOC);
+
+    if ($cached && !empty($cached['response_payload'])) {
+        $cachedData = json_decode($cached['response_payload'], true);
+        if ($cachedData && !empty($cachedData['ingredients'])) {
+            jsonResponse([
+                'success' => true,
+                'cached' => true,
+                'data' => $cachedData,
+                'fallback' => false
+            ], 200);
+        }
+    }
+
+    $apiKey = getenv('GEMINI_API_KEY');
+    if (!$apiKey || $apiKey === 'your_api_key_here') {
+        jsonResponse([
+            'error' => 'Gemini API key is not configured.',
+            'fallback' => true
+        ], 503);
+    }
+
+    $allowedUnits = ['g', 'kg', 'ml', 'l', 'pc', 'tbsp', 'tsp', 'cup'];
+
+    $systemInstruction = "You are an expert institutional food-service chef. Return ONLY raw JSON without markdown formatting.
+Schema:
+{
+  \"yield_servings\": 10,
+  \"ingredients\": [
+    {\"name\": \"Chicken Thigh\", \"quantity\": 1.5, \"unit\": \"kg\"},
+    {\"name\": \"Soy Sauce\", \"quantity\": 200, \"unit\": \"ml\"}
+  ],
+  \"instructions\": \"Brief prep and cooking steps.\"
+}
+RULES:
+1. 'unit' MUST strictly be one of: ['g', 'kg', 'ml', 'l', 'pc', 'tbsp', 'tsp', 'cup']. Any other unit is forbidden.
+2. If the dish name is gibberish or not food, return JSON: {\"error\": \"Invalid food item\"}.
+3. Break down composite ingredients into raw culinary staples.";
+
+    $userPrompt = "Generate institutional recipe for dish: " . $dishName;
+    $geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . urlencode($apiKey);
+
+    $payload = [
+        "contents" => [
+            [
+                "parts" => [
+                    ["text" => $systemInstruction . "\n\n" . $userPrompt]
+                ]
+            ]
+        ],
+        "generationConfig" => [
+            "responseMimeType" => "application/json"
+        ]
+    ];
+
+    $ch = curl_init($geminiUrl);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 12);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode !== 200 || !$response) {
+        jsonResponse([
+            'error' => 'AI Service temporarily unavailable. Please enter recipe manually.',
+            'fallback' => true
+        ], 503);
+    }
+
+    $resData = json_decode($response, true);
+    $text = $resData['candidates'][0]['content']['parts'][0]['text'] ?? null;
+    if (!$text) {
+        jsonResponse([
+            'error' => 'AI returned empty response.',
+            'fallback' => true
+        ], 503);
+    }
+
+    $aiJson = json_decode(trim($text), true);
+    if (!$aiJson || !empty($aiJson['error']) || empty($aiJson['ingredients']) || !is_array($aiJson['ingredients'])) {
+        jsonResponse([
+            'error' => 'AI generated invalid recipe structure.',
+            'fallback' => true
+        ], 503);
+    }
+
+    foreach ($aiJson['ingredients'] as $ing) {
+        $unit = strtolower(trim($ing['unit'] ?? ''));
+        if (!in_array($unit, $allowedUnits, true)) {
+            jsonResponse([
+                'error' => "AI generated unsupported unit '{$unit}'. Please enter recipe manually.",
+                'fallback' => true
+            ], 503);
+        }
+    }
+
+    $cacheStmt = $pdo->prepare("INSERT IGNORE INTO ai_query_cache (dish_name, response_payload) VALUES (?, ?)");
+    $cacheStmt->execute(['recipe_' . $md5Hash, json_encode($aiJson)]);
+
+    jsonResponse([
+        'success' => true,
+        'cached' => false,
+        'data' => $aiJson,
+        'fallback' => false
+    ], 200);
+}
+
+function handleGetPrepPlan($pdo) {
+    $store_id = requireVendor($pdo);
+
+    $requestedItems = [];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $body = json_decode(file_get_contents('php://input'), true);
+        $requestedItems = $body['items'] ?? [];
+    } elseif (isset($_GET['items'])) {
+        $requestedItems = json_decode($_GET['items'], true) ?: [];
+    }
+
+    if (empty($requestedItems)) {
+        $stmtActive = $pdo->prepare("
+            SELECT m.id as menu_item_id, m.name, 
+                   GREATEST(1, COALESCE(inv.online_pool_qty, 0) + COALESCE(inv.walkin_pool_qty, 0)) as default_servings
+            FROM menu_items m
+            LEFT JOIN inventory inv ON m.id = inv.menu_item_id
+            WHERE m.store_id = ? AND m.is_active = 1
+            ORDER BY m.id ASC
+        ");
+        $stmtActive->execute([$store_id]);
+        $activeRows = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($activeRows as $ar) {
+            $requestedItems[] = [
+                'menu_item_id' => (int)$ar['menu_item_id'],
+                'servings' => (int)$ar['default_servings']
+            ];
+        }
+    }
+
+    $combinedMap = [];
+    $dishesBreakdown = [];
+    $totalPlannedServings = 0;
+
+    foreach ($requestedItems as $req) {
+        $menuItemId = (int)($req['menu_item_id'] ?? 0);
+        $plannedServings = max(1, (int)($req['servings'] ?? 10));
+        if ($menuItemId <= 0) continue;
+
+        $stmtDish = $pdo->prepare("SELECT id, name FROM menu_items WHERE id = ? AND store_id = ?");
+        $stmtDish->execute([$menuItemId, $store_id]);
+        $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
+        if (!$dish) continue;
+
+        $totalPlannedServings += $plannedServings;
+
+        $stmtRecipe = $pdo->prepare("SELECT * FROM recipes WHERE menu_item_id = ?");
+        $stmtRecipe->execute([$menuItemId]);
+        $recipe = $stmtRecipe->fetch(PDO::FETCH_ASSOC);
+
+        $yieldServings = $recipe ? max(1, (int)$recipe['yield_servings']) : 1;
+        $scaleFactor = (float)$plannedServings / (float)$yieldServings;
+
+        $dishIngredients = [];
+        if ($recipe) {
+            $stmtIngs = $pdo->prepare("
+                SELECT ri.*, i.name as canonical_name
+                FROM recipe_ingredients ri
+                LEFT JOIN ingredients i ON ri.ingredient_id = i.id
+                WHERE ri.recipe_id = ?
+            ");
+            $stmtIngs->execute([$recipe['id']]);
+            $dishIngredients = $stmtIngs->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $stmtFallback = $pdo->prepare("
+                SELECT mi.ingredient_id, i.name as ingredient_name, 1 as quantity, 'pc' as unit, i.name as canonical_name
+                FROM menu_item_ingredients mi
+                JOIN ingredients i ON mi.ingredient_id = i.id
+                WHERE mi.menu_item_id = ?
+            ");
+            $stmtFallback->execute([$menuItemId]);
+            $dishIngredients = $stmtFallback->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        $dishesBreakdown[] = [
+            'menu_item_id' => $menuItemId,
+            'name' => $dish['name'],
+            'planned_servings' => $plannedServings,
+            'yield_servings' => $yieldServings,
+            'scale_factor' => round($scaleFactor, 2),
+            'has_recipe' => (bool)$recipe
+        ];
+
+        foreach ($dishIngredients as $ing) {
+            $ingName = trim($ing['ingredient_name'] ?? '');
+            if ($ingName === '') continue;
+
+            $unit = strtolower(trim($ing['unit'] ?? 'g'));
+            $origQty = (float)($ing['quantity'] ?? 0);
+            $scaledQty = $origQty * $scaleFactor;
+            $isUnmapped = empty($ing['ingredient_id']);
+
+            $dimension = 'other';
+            $baseQty = $scaledQty;
+            $baseUnit = $unit;
+
+            if (in_array($unit, ['g', 'kg'], true)) {
+                $dimension = 'mass';
+                $baseUnit = 'g';
+                $baseQty = ($unit === 'kg') ? ($scaledQty * 1000) : $scaledQty;
+            } elseif (in_array($unit, ['ml', 'l', 'liter', 'liters'], true)) {
+                $dimension = 'volume';
+                $baseUnit = 'ml';
+                $baseQty = in_array($unit, ['l', 'liter', 'liters'], true) ? ($scaledQty * 1000) : $scaledQty;
+            } elseif (in_array($unit, ['pc', 'pcs', 'piece', 'pieces'], true)) {
+                $dimension = 'count';
+                $baseUnit = 'pc';
+            } else {
+                $dimension = 'unit_' . $unit;
+                $baseUnit = $unit;
+            }
+
+            $normName = strtolower($ingName);
+            $key = $normName . '::' . $dimension;
+
+            if (!isset($combinedMap[$key])) {
+                $combinedMap[$key] = [
+                    'name' => $ingName,
+                    'dimension' => $dimension,
+                    'base_unit' => $baseUnit,
+                    'total_base_qty' => 0.0,
+                    'is_unmapped' => false,
+                    'dishes' => []
+                ];
+            }
+
+            $combinedMap[$key]['total_base_qty'] += $baseQty;
+            if ($isUnmapped) {
+                $combinedMap[$key]['is_unmapped'] = true;
+            }
+            $combinedMap[$key]['dishes'][] = [
+                'dish_name' => $dish['name'],
+                'servings' => $plannedServings,
+                'scaled_qty' => round($scaledQty, 2),
+                'unit' => $unit
+            ];
+        }
+    }
+
+    $prepList = [];
+    foreach ($combinedMap as $key => $item) {
+        $finalQty = $item['total_base_qty'];
+        $finalUnit = $item['base_unit'];
+
+        if ($item['dimension'] === 'mass') {
+            if ($finalQty >= 1000) {
+                $finalQty = round($finalQty / 1000, 2);
+                $finalUnit = 'kg';
+            } else {
+                $finalQty = round($finalQty, 1);
+                $finalUnit = 'g';
+            }
+        } elseif ($item['dimension'] === 'volume') {
+            if ($finalQty >= 1000) {
+                $finalQty = round($finalQty / 1000, 2);
+                $finalUnit = 'l';
+            } else {
+                $finalQty = round($finalQty, 1);
+                $finalUnit = 'ml';
+            }
+        } elseif ($item['dimension'] === 'count') {
+            $finalQty = round($finalQty, 1);
+            $finalUnit = 'pc';
+        } else {
+            $finalQty = round($finalQty, 2);
+        }
+
+        $dishNames = array_values(array_unique(array_column($item['dishes'], 'dish_name')));
+
+        $prepList[] = [
+            'name' => $item['name'],
+            'total_quantity' => $finalQty,
+            'unit' => $finalUnit,
+            'dimension' => $item['dimension'],
+            'is_unmapped' => (bool)$item['is_unmapped'],
+            'used_in_dishes' => $dishNames,
+            'dish_count' => count($dishNames),
+            'breakdown' => $item['dishes']
+        ];
+    }
+
+    usort($prepList, function($a, $b) {
+        if ($a['is_unmapped'] !== $b['is_unmapped']) {
+            return $b['is_unmapped'] <=> $a['is_unmapped'];
+        }
+        return strcasecmp($a['name'], $b['name']);
+    });
+
+    jsonResponse([
+        'total_dishes' => count($dishesBreakdown),
+        'total_servings' => $totalPlannedServings,
+        'dishes' => $dishesBreakdown,
+        'prep_list' => $prepList
+    ]);
+}
+

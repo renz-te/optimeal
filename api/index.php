@@ -133,6 +133,18 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/dish' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSaveDish($pdo);
+} elseif ($route === '/vendor/dish/recipe' && $method === 'GET') {
+    require 'routes/vendor.php';
+    handleGetRecipe($pdo);
+} elseif ($route === '/vendor/dish/recipe' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleSaveRecipe($pdo);
+} elseif ($route === '/vendor/dish/recipe/suggest' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleSuggestRecipe($pdo);
+} elseif ($route === '/vendor/prep-plan' && ($method === 'GET' || $method === 'POST')) {
+    require 'routes/vendor.php';
+    handleGetPrepPlan($pdo);
 } elseif ($route === '/vendor/menu' && $method === 'GET') {
     require 'routes/vendor.php';
     handleGetVendorMenu($pdo);
