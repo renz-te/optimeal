@@ -146,6 +146,18 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleResolveSubmission($pdo);
+} elseif ($route === '/admin/settings' && $method === 'GET') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleGetSettings($pdo);
+} elseif ($route === '/admin/settings' && $method === 'POST') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleUpdateSettings($pdo);
+} elseif ($route === '/admin/metrics' && $method === 'GET') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleGetDashboardMetrics($pdo);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }

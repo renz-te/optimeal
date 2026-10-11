@@ -316,4 +316,154 @@ function handleResolveSubmission($pdo) {
     }
 }
 
+function handleGetSettings($pdo) {
+    try {
+        $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, updated_at FROM settings WHERE id = 1");
+        $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$settings) {
+            $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate) VALUES (1, 30, '07:00', '20:00', 5, 10.00)");
+            $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, updated_at FROM settings WHERE id = 1");
+            $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        jsonResponse([
+            'settings' => [
+                'id' => (int)$settings['id'],
+                'reservation_ttl' => (int)$settings['reservation_ttl'],
+                'opening_time' => $settings['opening_time'],
+                'closing_time' => $settings['closing_time'],
+                'max_discount_qty' => (int)$settings['max_discount_qty'],
+                'default_decay_rate' => (float)$settings['default_decay_rate'],
+                'updated_at' => $settings['updated_at']
+            ]
+        ]);
+    } catch (Exception $e) {
+        jsonResponse(['error' => 'Failed to fetch settings: ' . $e->getMessage()], 500);
+    }
+}
+
+function handleUpdateSettings($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!isset($input['reservation_ttl'])) {
+        jsonResponse(['error' => 'Reservation TTL is required.'], 400);
+    }
+
+    $reservationTtl = max(1, (int)$input['reservation_ttl']);
+    $openingTime = isset($input['opening_time']) ? trim($input['opening_time']) : '07:00';
+    $closingTime = isset($input['closing_time']) ? trim($input['closing_time']) : '20:00';
+    $maxDiscountQty = isset($input['max_discount_qty']) ? max(0, (int)$input['max_discount_qty']) : 5;
+    $defaultDecayRate = isset($input['default_decay_rate']) ? max(0, (float)$input['default_decay_rate']) : 10.00;
+
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE settings 
+            SET reservation_ttl = ?, opening_time = ?, closing_time = ?, max_discount_qty = ?, default_decay_rate = ? 
+            WHERE id = 1
+        ");
+        $stmt->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate]);
+
+        // If no row updated, ensure row 1 exists
+        if ($stmt->rowCount() === 0) {
+            $check = $pdo->query("SELECT id FROM settings WHERE id = 1")->fetchColumn();
+            if (!$check) {
+                $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate) VALUES (1, ?, ?, ?, ?, ?)");
+                $ins->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate]);
+            }
+        }
+
+        $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, updated_at FROM settings WHERE id = 1");
+        $updated = $fetchStmt->fetch(PDO::FETCH_ASSOC);
+
+        jsonResponse([
+            'message' => 'Settings updated successfully',
+            'settings' => [
+                'id' => (int)$updated['id'],
+                'reservation_ttl' => (int)$updated['reservation_ttl'],
+                'opening_time' => $updated['opening_time'],
+                'closing_time' => $updated['closing_time'],
+                'max_discount_qty' => (int)$updated['max_discount_qty'],
+                'default_decay_rate' => (float)$updated['default_decay_rate'],
+                'updated_at' => $updated['updated_at']
+            ]
+        ]);
+    } catch (Exception $e) {
+        jsonResponse(['error' => 'Failed to update settings: ' . $e->getMessage()], 500);
+    }
+}
+
+function handleGetDashboardMetrics($pdo) {
+    try {
+        // 1. Users metrics
+        $userStmt = $pdo->query("
+            SELECT 
+                COUNT(*) as total_users,
+                SUM(CASE WHEN role IN ('student', 'customer') THEN 1 ELSE 0 END) as student_users,
+                SUM(CASE WHEN role = 'vendor' THEN 1 ELSE 0 END) as vendor_users,
+                SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) as admin_users
+            FROM users
+        ");
+        $userData = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+        // 2. Menu dishes metrics
+        $menuStmt = $pdo->query("
+            SELECT 
+                COUNT(*) as total_dishes,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_dishes
+            FROM menu_items
+        ");
+        $menuData = $menuStmt->fetch(PDO::FETCH_ASSOC);
+
+        // 3. Orders & Reservations metrics
+        $orderStmt = $pdo->query("
+            SELECT 
+                COUNT(*) as total_orders,
+                SUM(CASE WHEN status IN ('reserved', 'paid') THEN 1 ELSE 0 END) as active_orders,
+                SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) as claimed_orders,
+                SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_orders,
+                SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired_orders
+            FROM orders
+        ");
+        $orderData = $orderStmt->fetch(PDO::FETCH_ASSOC);
+
+        // 4. Taxonomy & Quality metrics
+        $ingStmt = $pdo->query("SELECT COUNT(*) FROM ingredients");
+        $totalIngredients = (int)$ingStmt->fetchColumn();
+
+        $subStmt = $pdo->query("SELECT COUNT(*) FROM ingredient_submissions WHERE status = 'pending'");
+        $pendingSubmissions = (int)$subStmt->fetchColumn();
+
+        $allergensStmt = $pdo->query("SELECT COUNT(*) FROM critical_allergens");
+        $totalAllergens = (int)$allergensStmt->fetchColumn();
+
+        jsonResponse([
+            'users' => [
+                'total' => (int)$userData['total_users'],
+                'students' => (int)$userData['student_users'],
+                'vendors' => (int)$userData['vendor_users'],
+                'admins' => (int)$userData['admin_users']
+            ],
+            'menu' => [
+                'total' => (int)$menuData['total_dishes'],
+                'active' => (int)$menuData['active_dishes']
+            ],
+            'orders' => [
+                'total' => (int)$orderData['total_orders'],
+                'active' => (int)$orderData['active_orders'],
+                'claimed' => (int)$orderData['claimed_orders'],
+                'cancelled' => (int)$orderData['cancelled_orders'],
+                'expired' => (int)$orderData['expired_orders']
+            ],
+            'taxonomy' => [
+                'ingredients' => $totalIngredients,
+                'pending_submissions' => $pendingSubmissions,
+                'critical_allergens' => $totalAllergens
+            ]
+        ]);
+    } catch (Exception $e) {
+        jsonResponse(['error' => 'Failed to calculate metrics: ' . $e->getMessage()], 500);
+    }
+}
+
+
 
