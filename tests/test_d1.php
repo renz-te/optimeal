@@ -1,9 +1,10 @@
 <?php
+if (php_sapi_name() !== 'cli') { http_response_code(404); exit; }
 // tests/test_d1.php - Verification suite for Phase D1 & The Amendment
 
 $baseUrl = 'http://127.0.0.1/optimeal/api';
-$cookieFileVendor = __DIR__ . '/cookie_vendor_d1.txt';
-$cookieFileStudent = __DIR__ . '/cookie_student_d1.txt';
+$cookieFileVendor = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cookie_vendor_d1.txt';
+$cookieFileStudent = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cookie_student_d1.txt';
 
 if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
 if (file_exists($cookieFileStudent)) unlink($cookieFileStudent);
@@ -221,15 +222,18 @@ if ($auditRes['status'] === 200) {
     echo "  Claimed Orders:  {$summary['claimed_orders']}\n";
     echo "  Total Revenue:   PHP {$summary['total_revenue']}\n";
     echo "  Total Unsold:    {$summary['total_unsold_units']} units\n";
-    echo "  Est. Waste Val:  PHP {$summary['total_waste_value']}\n";
+    echo "  Unsold Val:      PHP " . ($summary['total_unsold_stock_value'] ?? $summary['unsold_stock_value'] ?? '0') . "\n";
+    echo "  On Sale Val:     PHP {$summary['total_on_sale_value']}\n";
+    echo "  Written Off Val: PHP {$summary['total_written_off_value']}\n";
 
     // Find Chowder (901) and Rice (902) in unsold_inventory
     foreach ($auditRes['data']['unsold_inventory'] as $item) {
         if (in_array($item['id'], [901, 902])) {
             $expectedUnits = $item['online_pool_qty'] + $item['walkin_pool_qty'];
-            $expectedWaste = round($item['base_price'] * $expectedUnits, 2);
-            echo "  Dish [{$item['name']}]: Online={$item['online_pool_qty']}, Walk-in={$item['walkin_pool_qty']} => Remaining Stock={$item['remaining_stock']} (Expected: $expectedUnits), Waste Val={$item['estimated_waste_value']} (Expected: $expectedWaste)\n";
-            if ($item['remaining_stock'] == $expectedUnits && (float)$item['estimated_waste_value'] == (float)$expectedWaste) {
+            $expectedStockVal = round($item['base_price'] * $expectedUnits, 2);
+            $val = $item['unsold_stock_value'] ?? $item['estimated_waste_value'] ?? 0;
+            echo "  Dish [{$item['name']}]: Online={$item['online_pool_qty']}, Walk-in={$item['walkin_pool_qty']} => Remaining Stock={$item['remaining_stock']} (Expected: $expectedUnits), Unsold Stock Val={$val} (Expected: $expectedStockVal), Status={$item['status']}\n";
+            if ($item['remaining_stock'] == $expectedUnits && (float)$val == (float)$expectedStockVal) {
                 echo "    ✓ Unsold calculation matches (Online + Walk-in).\n";
             } else {
                 echo "    ✗ Unsold calculation mismatch!\n";

@@ -1,8 +1,9 @@
 <?php
+if (php_sapi_name() !== 'cli') { http_response_code(404); exit; }
 // test_c5.php
 
 $baseUrl = 'http://127.0.0.1/optimeal/api';
-$cookieFileVendor = __DIR__ . '/cookie_vendor_c5.txt';
+$cookieFileVendor = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cookie_vendor_c5.txt';
 if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
 
 require_once __DIR__ . '/../api/db.php';

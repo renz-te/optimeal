@@ -6,3 +6,5 @@ api/.env
 .env.*
 *.local
 .DS_Store
+tests/*.txt
+tests/cookie_*

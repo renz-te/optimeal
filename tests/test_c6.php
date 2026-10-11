@@ -1,9 +1,10 @@
 <?php
+if (php_sapi_name() !== 'cli') { http_response_code(404); exit; }
 // test_c6.php
 
 $baseUrl = 'http://127.0.0.1/optimeal/api';
-$cookieFileVendor = __DIR__ . '/cookie_vendor_c6.txt';
-$cookieFileCustomer = __DIR__ . '/cookie_customer_c6.txt';
+$cookieFileVendor = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cookie_vendor_c6.txt';
+$cookieFileCustomer = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cookie_customer_c6.txt';
 
 if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
 if (file_exists($cookieFileCustomer)) unlink($cookieFileCustomer);

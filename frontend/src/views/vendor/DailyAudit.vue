@@ -98,24 +98,22 @@
         </div>
       </div>
 
-      <!-- Unsold Inventory (Waste) -->
+      <!-- Unsold Inventory (Waste & Surplus) -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
         <div class="flex justify-between items-start">
           <div>
-            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Unsold Live Stock</p>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Unsold stock value (at menu price)</p>
             <h2 class="text-3xl font-black text-amber-600 mt-2">
-              {{ auditData.summary?.total_unsold_units || 0 }} <span class="text-sm font-medium text-slate-400">units</span>
+              ₱{{ formatMoney(auditData.summary?.unsold_stock_value ?? auditData.summary?.total_waste_value ?? 0) }}
             </h2>
           </div>
           <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-lg">
             ⚖️
           </div>
         </div>
-        <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
-          <span>Est. Waste Value</span>
-          <span class="text-amber-800 font-bold bg-amber-50 px-2 py-0.5 rounded-md">
-            ₱{{ formatMoney(auditData.summary?.total_waste_value || 0) }}
-          </span>
+        <div class="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-xs font-semibold text-slate-500">
+          <span>On sale: <strong class="text-emerald-700">₱{{ formatMoney(auditData.summary?.total_on_sale_value || 0) }}</strong></span>
+          <span>Written off: <strong class="text-rose-700">₱{{ formatMoney(auditData.summary?.total_written_off_value || 0) }}</strong></span>
         </div>
       </div>
     </div>
@@ -140,10 +138,10 @@
               <th class="px-6 py-4">Category</th>
               <th class="px-6 py-4 text-center">Remaining Stock</th>
               <th class="px-6 py-4 text-right">Base Price</th>
-              <th class="px-6 py-4 text-right">Potential Loss</th>
+              <th class="px-6 py-4 text-right">Unsold stock value (at menu price)</th>
               <th class="px-6 py-4">Cooked At</th>
               <th class="px-6 py-4">Sell-By Time</th>
-              <th class="px-6 py-4 text-center">Holding Status</th>
+              <th class="px-6 py-4 text-center">Status</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -173,7 +171,7 @@
                 ₱{{ formatMoney(item.base_price) }}
               </td>
               <td class="px-6 py-4 text-right font-bold text-amber-700">
-                ₱{{ formatMoney(item.estimated_waste_value) }}
+                ₱{{ formatMoney(item.unsold_stock_value ?? item.estimated_waste_value) }}
               </td>
               <td class="px-6 py-4 text-xs font-medium text-slate-500">
                 {{ formatDateTime(item.cooked_at) }}
@@ -183,22 +181,22 @@
               </td>
               <td class="px-6 py-4 text-center">
                 <span 
-                  v-if="item.is_expired == 1" 
-                  class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700 border border-rose-200"
-                >
-                  ⚠️ Expired / Spoiled
-                </span>
-                <span 
-                  v-else-if="item.sell_by" 
+                  v-if="item.status === 'On sale'" 
                   class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"
                 >
-                  ✓ Safe Holding
+                  ✓ On sale
+                </span>
+                <span 
+                  v-else-if="item.status === 'Expired / closed'" 
+                  class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700 border border-rose-200"
+                >
+                  ⚠️ Expired / closed
                 </span>
                 <span 
                   v-else 
                   class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600"
                 >
-                  Unspecified
+                  {{ item.status || 'Unspecified' }}
                 </span>
               </td>
             </tr>

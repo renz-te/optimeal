@@ -737,6 +737,23 @@ function handleGetDailyAudit($pdo) {
     $store_id = requireStaff($pdo);
     date_default_timezone_set('Asia/Manila');
 
+    // 0. Operating hours from settings
+    $stmtSettings = $pdo->query("SELECT opening_time, closing_time FROM settings WHERE id = 1");
+    $settingsRow = $stmtSettings->fetch(PDO::FETCH_ASSOC) ?: [];
+    $openingTime = !empty($settingsRow['opening_time']) ? trim($settingsRow['opening_time']) : '07:00';
+    $closingTime = !empty($settingsRow['closing_time']) ? trim($settingsRow['closing_time']) : '20:00';
+
+    $nowTime = date('H:i');
+    $openTimeFormat = date('H:i', strtotime($openingTime));
+    $closeTimeFormat = date('H:i', strtotime($closingTime));
+
+    if ($closeTimeFormat >= $openTimeFormat) {
+        $isShopClosed = ($nowTime >= $closeTimeFormat || $nowTime < $openTimeFormat);
+    } else {
+        // Overnight operating hours
+        $isShopClosed = ($nowTime >= $closeTimeFormat && $nowTime < $openTimeFormat);
+    }
+
     // 1. Aggregated daily order metrics for today in Asia/Manila
     $orderQuery = "
         SELECT 
@@ -754,7 +771,7 @@ function handleGetDailyAudit($pdo) {
     $stmtOrders->execute([$store_id]);
     $orderSummary = $stmtOrders->fetch(PDO::FETCH_ASSOC);
 
-    // 2. Unsold live inventory / waste for active dishes (including Walk-in Pool)
+    // 2. Unsold live inventory / surplus for active dishes (including Walk-in Pool)
     $inventoryQuery = "
         SELECT 
             m.id, 
@@ -766,11 +783,7 @@ function handleGetDailyAudit($pdo) {
             i.walkin_pool_qty,
             i.cooked_at,
             i.sell_by,
-            CASE 
-                WHEN i.sell_by IS NOT NULL AND i.sell_by <= NOW() THEN 1 
-                ELSE 0 
-            END AS is_expired,
-            ROUND(m.base_price * (i.online_pool_qty + i.walkin_pool_qty), 2) AS estimated_waste_value
+            ROUND(m.base_price * (i.online_pool_qty + i.walkin_pool_qty), 2) AS unsold_stock_value
         FROM menu_items m
         JOIN inventory i ON m.id = i.menu_item_id
         WHERE m.store_id = ? AND m.is_active = 1
@@ -778,17 +791,41 @@ function handleGetDailyAudit($pdo) {
     ";
     $stmtInventory = $pdo->prepare($inventoryQuery);
     $stmtInventory->execute([$store_id]);
-    $unsoldItems = $stmtInventory->fetchAll(PDO::FETCH_ASSOC);
+    $rawUnsoldItems = $stmtInventory->fetchAll(PDO::FETCH_ASSOC);
 
     $totalUnsoldQty = 0;
-    $totalWasteValue = 0.0;
+    $totalUnsoldStockValue = 0.0;
+    $totalOnSaleValue = 0.0;
+    $totalWrittenOffValue = 0.0;
     $expiredDishesCount = 0;
-    foreach ($unsoldItems as $item) {
-        $totalUnsoldQty += (int)$item['remaining_stock'];
-        $totalWasteValue += (float)$item['estimated_waste_value'];
-        if (!empty($item['is_expired'])) {
+    $unsoldItems = [];
+
+    $nowTimestamp = time();
+    foreach ($rawUnsoldItems as $item) {
+        $remainingStock = (int)$item['remaining_stock'];
+        $unsoldValue = (float)$item['unsold_stock_value'];
+        $isExpired = (!empty($item['sell_by']) && strtotime($item['sell_by']) <= $nowTimestamp);
+
+        if ($isExpired) {
             $expiredDishesCount++;
         }
+
+        // Status: "On sale" vs "Expired / closed"
+        if ($isExpired || $isShopClosed) {
+            $status = 'Expired / closed';
+            $totalWrittenOffValue += $unsoldValue;
+        } else {
+            $status = 'On sale';
+            $totalOnSaleValue += $unsoldValue;
+        }
+
+        $totalUnsoldQty += $remainingStock;
+        $totalUnsoldStockValue += $unsoldValue;
+
+        $item['status'] = $status;
+        $item['is_expired'] = $isExpired ? 1 : 0;
+        $item['is_closed'] = $isShopClosed ? 1 : 0;
+        $unsoldItems[] = $item;
     }
 
     // 3. Itemized list of today's orders
@@ -821,8 +858,13 @@ function handleGetDailyAudit($pdo) {
             'expired_orders' => (int)$orderSummary['expired_orders'],
             'active_orders' => (int)$orderSummary['active_orders'],
             'total_unsold_units' => $totalUnsoldQty,
-            'total_waste_value' => round($totalWasteValue, 2),
-            'expired_dishes_count' => $expiredDishesCount
+            'unsold_stock_value' => round($totalUnsoldStockValue, 2),
+            'total_on_sale_value' => round($totalOnSaleValue, 2),
+            'total_written_off_value' => round($totalWrittenOffValue, 2),
+            'expired_dishes_count' => $expiredDishesCount,
+            'opening_time' => $openingTime,
+            'closing_time' => $closingTime,
+            'is_shop_closed' => (bool)$isShopClosed
         ],
         'unsold_inventory' => $unsoldItems,
         'orders' => $recentOrders
