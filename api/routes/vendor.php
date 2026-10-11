@@ -216,22 +216,24 @@ function handleEnrichDish($pdo) {
         jsonResponse(['error' => 'Missing or empty dish name'], 400);
     }
 
-    $apiKey = getenv('GEMINI_API_KEY');
-    if (!$apiKey || $apiKey === 'your_api_key_here') {
-        jsonResponse(['error' => 'Server configuration error: Missing API Key'], 500);
-    }
+    $dishName = trim($input['name']);
+    $sanitizedDishName = strtolower($dishName);
 
-    $dishName = htmlspecialchars(trim($input['name']));
-    $normalizedDishName = strtolower($dishName);
-
+    // Backend Cache Hit: Query ai_query_cache for a match
     $cacheStmt = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name = ?");
-    $cacheStmt->execute([$normalizedDishName]);
+    $cacheStmt->execute([$sanitizedDishName]);
     $cached = $cacheStmt->fetch();
-    if ($cached) {
+    if ($cached && !empty($cached['response_payload'])) {
         $aiJson = json_decode($cached['response_payload'], true);
         if ($aiJson) {
             jsonResponse($aiJson, 200);
         }
+    }
+
+    // Backend Cache Miss: Proceed with LLM generation logic
+    $apiKey = getenv('GEMINI_API_KEY');
+    if (!$apiKey || $apiKey === 'your_api_key_here') {
+        jsonResponse(['error' => 'Server configuration error: Missing API Key'], 500);
     }
 
     $description = isset($input['description']) ? htmlspecialchars(trim($input['description'])) : '';
@@ -286,7 +288,7 @@ function handleEnrichDish($pdo) {
         
         if (json_last_error() === JSON_ERROR_NONE && isset($aiJson['ingredients']) && isset($aiJson['macros'])) {
             $insertStmt = $pdo->prepare("INSERT IGNORE INTO ai_query_cache (dish_name, response_payload) VALUES (?, ?)");
-            $insertStmt->execute([$normalizedDishName, $aiText]);
+            $insertStmt->execute([$sanitizedDishName, json_encode($aiJson)]);
             jsonResponse($aiJson, 200);
         }
     }

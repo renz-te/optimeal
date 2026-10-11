@@ -113,6 +113,6 @@ CREATE TABLE IF NOT EXISTS inventory (
 CREATE TABLE IF NOT EXISTS ai_query_cache (
     id INT AUTO_INCREMENT PRIMARY KEY,
     dish_name VARCHAR(255) UNIQUE NOT NULL,
-    response_payload TEXT NOT NULL,
+    response_payload JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
