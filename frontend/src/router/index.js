@@ -34,7 +34,8 @@ const routes = [
       { path: 'roster', name: 'VendorRoster', component: () => import('../views/vendor/DailyRoster.vue') },
       { path: 'catalog', redirect: '/vendor/roster' },
       { path: 'decay', component: () => import('../views/vendor/DecayRules.vue') },
-      { path: 'summary', component: () => import('../views/vendor/Summary.vue') }
+      { path: 'audit', component: () => import('../views/vendor/DailyAudit.vue') },
+      { path: 'summary', redirect: '/vendor/audit' }
     ]
   },
   {

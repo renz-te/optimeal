@@ -723,3 +723,98 @@ function handleTriggerEmergencyDecay($pdo) {
         'emergency_clearance_active' => (bool)$active
     ]);
 }
+
+function handleGetDailyAudit($pdo) {
+    $store_id = requireStaff($pdo);
+    date_default_timezone_set('Asia/Manila');
+
+    // 1. Aggregated daily order metrics for today in Asia/Manila
+    $orderQuery = "
+        SELECT 
+            COUNT(*) AS total_orders,
+            COALESCE(SUM(CASE WHEN status = 'claimed' THEN total_amount ELSE 0 END), 0) AS total_revenue,
+            COALESCE(SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END), 0) AS claimed_orders,
+            COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled_orders,
+            COALESCE(SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END), 0) AS expired_orders,
+            COALESCE(SUM(CASE WHEN status IN ('reserved', 'paid') THEN 1 ELSE 0 END), 0) AS active_orders
+        FROM orders
+        WHERE store_id = ? 
+          AND DATE(COALESCE(reserved_at, NOW())) = CURDATE()
+    ";
+    $stmtOrders = $pdo->prepare($orderQuery);
+    $stmtOrders->execute([$store_id]);
+    $orderSummary = $stmtOrders->fetch(PDO::FETCH_ASSOC);
+
+    // 2. Unsold live inventory / waste for active dishes
+    $inventoryQuery = "
+        SELECT 
+            m.id, 
+            m.name, 
+            m.category, 
+            m.base_price, 
+            i.online_pool_qty AS remaining_stock,
+            i.walkin_pool_qty,
+            i.cooked_at,
+            i.sell_by,
+            CASE 
+                WHEN i.sell_by IS NOT NULL AND i.sell_by <= NOW() THEN 1 
+                ELSE 0 
+            END AS is_expired,
+            ROUND(m.base_price * i.online_pool_qty, 2) AS estimated_waste_value
+        FROM menu_items m
+        JOIN inventory i ON m.id = i.menu_item_id
+        WHERE m.store_id = ? AND m.is_active = 1
+        ORDER BY m.name ASC
+    ";
+    $stmtInventory = $pdo->prepare($inventoryQuery);
+    $stmtInventory->execute([$store_id]);
+    $unsoldItems = $stmtInventory->fetchAll(PDO::FETCH_ASSOC);
+
+    $totalUnsoldQty = 0;
+    $totalWasteValue = 0.0;
+    $expiredDishesCount = 0;
+    foreach ($unsoldItems as $item) {
+        $totalUnsoldQty += (int)$item['remaining_stock'];
+        $totalWasteValue += (float)$item['estimated_waste_value'];
+        if (!empty($item['is_expired'])) {
+            $expiredDishesCount++;
+        }
+    }
+
+    // 3. Itemized list of today's orders
+    $ledgerQuery = "
+        SELECT 
+            o.id, 
+            o.status, 
+            o.total_amount, 
+            o.claim_token, 
+            o.fulfillment_type, 
+            o.reserved_at, 
+            u.name AS customer_name
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.store_id = ? 
+          AND DATE(COALESCE(o.reserved_at, NOW())) = CURDATE()
+        ORDER BY o.reserved_at DESC
+    ";
+    $stmtLedger = $pdo->prepare($ledgerQuery);
+    $stmtLedger->execute([$store_id]);
+    $recentOrders = $stmtLedger->fetchAll(PDO::FETCH_ASSOC);
+
+    jsonResponse([
+        'date' => date('Y-m-d'),
+        'summary' => [
+            'total_revenue' => (float)$orderSummary['total_revenue'],
+            'total_orders' => (int)$orderSummary['total_orders'],
+            'claimed_orders' => (int)$orderSummary['claimed_orders'],
+            'cancelled_orders' => (int)$orderSummary['cancelled_orders'],
+            'expired_orders' => (int)$orderSummary['expired_orders'],
+            'active_orders' => (int)$orderSummary['active_orders'],
+            'total_unsold_units' => $totalUnsoldQty,
+            'total_waste_value' => round($totalWasteValue, 2),
+            'expired_dishes_count' => $expiredDishesCount
+        ],
+        'unsold_inventory' => $unsoldItems,
+        'orders' => $recentOrders
+    ]);
+}

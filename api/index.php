@@ -138,6 +138,10 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/menu/launch' && $method === 'POST') {
     require 'routes/vendor.php';
     handleLaunchMenu($pdo);
+} elseif ($route === '/vendor/audit' && $method === 'GET') {
+    requireStaff($pdo);
+    require 'routes/vendor.php';
+    handleGetDailyAudit($pdo);
 } elseif ($route === '/admin/users' && $method === 'GET') {
     requireAdmin($pdo);
     require 'routes/admin.php';
