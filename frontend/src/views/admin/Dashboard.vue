@@ -4,7 +4,7 @@
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
       <div>
         <h1 class="text-3xl font-black text-slate-900 tracking-tight">System Overview & Settings</h1>
-        <p class="text-slate-500 mt-1 font-medium">Live platform metrics and global cafeteria operating parameters.</p>
+        <p class="text-slate-500 mt-1 font-medium">Live platform metrics, AI engine telemetry, and global cafeteria parameters.</p>
       </div>
 
       <button
@@ -30,7 +30,7 @@
     </div>
 
     <!-- Live Platform Metrics Grid -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       <!-- Card 1: Users -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
         <div class="flex items-center justify-between mb-4">
@@ -127,6 +127,126 @@
             <span v-else class="text-xs text-slate-400 font-medium">
               Queue clear ({{ metrics.taxonomy?.critical_allergens ?? 10 }} Master Allergens)
             </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI ENGINE CONTROL & TELEMETRY PANEL -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+      <div class="p-6 border-b border-slate-100 bg-gradient-to-r from-purple-50/60 via-indigo-50/40 to-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="flex items-center space-x-3">
+          <div class="p-2.5 bg-purple-100 text-purple-700 rounded-xl shadow-xs">
+            <Sparkles :size="22" />
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-slate-900 flex items-center">
+              <span>AI Engine Control & Telemetry</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Global master kill-switch for dish generation and automated composition telemetry.</p>
+          </div>
+        </div>
+
+        <!-- Master Status Badge -->
+        <div>
+          <span
+            v-if="settingsForm.ai_enabled"
+            class="px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center"
+          >
+            <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></span>
+            AI Online & Enabled
+          </span>
+          <span
+            v-else
+            class="px-3.5 py-1.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center"
+          >
+            <span class="w-2 h-2 rounded-full bg-rose-500 mr-2"></span>
+            Kill Switch Active / AI Offline
+          </span>
+        </div>
+      </div>
+
+      <div class="p-6 lg:p-8 space-y-6">
+        <!-- Master Toggle Row -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 bg-slate-50/80 rounded-xl border border-slate-200 gap-4">
+          <div>
+            <h3 class="font-bold text-slate-900 text-sm">AI Recipe & Dish Generation Master Switch</h3>
+            <p class="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              When toggled off, all AI dish generation, enrichment, and ingredient breakdowns are blocked across the vendor terminal.
+            </p>
+          </div>
+
+          <div class="flex items-center space-x-3 shrink-0">
+            <span class="text-xs font-bold" :class="settingsForm.ai_enabled ? 'text-emerald-700' : 'text-slate-400'">
+              {{ settingsForm.ai_enabled ? 'ENABLED' : 'DISABLED' }}
+            </span>
+            <button
+              id="toggle-ai-enabled"
+              type="button"
+              role="switch"
+              :aria-checked="settingsForm.ai_enabled"
+              @click="handleToggleAi"
+              :disabled="togglingAi"
+              class="relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50"
+              :class="settingsForm.ai_enabled ? 'bg-purple-600' : 'bg-slate-300'"
+            >
+              <span
+                class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
+                :class="settingsForm.ai_enabled ? 'translate-x-7' : 'translate-x-0'"
+              />
+            </button>
+          </div>
+        </div>
+
+        <!-- Telemetry Metrics Grid -->
+        <div>
+          <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">AI Engine Telemetry</h4>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <!-- Unconfirmed AI Dishes -->
+            <div
+              id="telemetry-unconfirmed-dishes"
+              class="p-4 rounded-xl border flex flex-col justify-between"
+              :class="(metrics.ai?.unconfirmed_dishes ?? 0) > 0
+                ? 'bg-amber-50/70 border-amber-200'
+                : 'bg-slate-50/60 border-slate-200'"
+            >
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-bold" :class="(metrics.ai?.unconfirmed_dishes ?? 0) > 0 ? 'text-amber-800' : 'text-slate-500'">
+                  Unconfirmed AI Dishes
+                </span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="(metrics.ai?.unconfirmed_dishes ?? 0) > 0 ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-600'">
+                  Review Required
+                </span>
+              </div>
+              <div class="text-2xl font-black" :class="(metrics.ai?.unconfirmed_dishes ?? 0) > 0 ? 'text-amber-700' : 'text-slate-800'">
+                {{ metrics.ai?.unconfirmed_dishes ?? 0 }}
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Generated dishes awaiting staff confirmation</p>
+            </div>
+
+            <!-- Staff Confirmed Dishes -->
+            <div id="telemetry-confirmed-dishes" class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-bold text-slate-500">Staff Confirmed Dishes</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">Verified</span>
+              </div>
+              <div class="text-2xl font-black text-slate-800">
+                {{ metrics.ai?.confirmed_dishes ?? 0 }}
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Dishes verified by cafeteria staff</p>
+            </div>
+
+            <!-- Cached Queries -->
+            <div id="telemetry-cached-queries" class="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-bold text-slate-500">AI Query Cache</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 text-indigo-800">Efficiency</span>
+              </div>
+              <div class="text-2xl font-black text-slate-800">
+                {{ metrics.ai?.cached_queries ?? 0 }}
+              </div>
+              <p class="text-[11px] text-slate-500 mt-1">Cached queries saving LLM API costs</p>
+            </div>
           </div>
         </div>
       </div>
@@ -286,12 +406,14 @@ import {
   CheckCircle,
   Clock,
   Sliders,
-  Save
+  Save,
+  Sparkles
 } from 'lucide-vue-next'
 
 const loadingMetrics = ref(false)
 const loadingSettings = ref(false)
 const savingSettings = ref(false)
+const togglingAi = ref(false)
 const pageError = ref('')
 const settingsError = ref('')
 const successMessage = ref('')
@@ -300,7 +422,8 @@ const metrics = reactive({
   users: { total: 0, students: 0, vendors: 0, admins: 0 },
   menu: { total: 0, active: 0 },
   orders: { total: 0, active: 0, claimed: 0, cancelled: 0 },
-  taxonomy: { ingredients: 0, pending_submissions: 0, critical_allergens: 0 }
+  taxonomy: { ingredients: 0, pending_submissions: 0, critical_allergens: 0 },
+  ai: { unconfirmed_dishes: 0, confirmed_dishes: 0, cached_queries: 0 }
 })
 
 const settingsForm = reactive({
@@ -310,6 +433,7 @@ const settingsForm = reactive({
   closing_time: '20:00',
   max_discount_qty: 5,
   default_decay_rate: 10.00,
+  ai_enabled: true,
   updated_at: ''
 })
 
@@ -359,6 +483,46 @@ onMounted(() => {
   loadDashboardData()
 })
 
+const handleToggleAi = async () => {
+  togglingAi.value = true
+  const targetState = !settingsForm.ai_enabled
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ai_enabled: targetState
+      })
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update AI state.')
+    }
+
+    if (data.settings) {
+      Object.assign(settingsForm, data.settings)
+    } else {
+      settingsForm.ai_enabled = targetState
+    }
+
+    successMessage.value = `AI Generation ${settingsForm.ai_enabled ? 'enabled' : 'disabled (kill switch engaged)'} successfully.`
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 4000)
+
+    // Re-fetch metrics to refresh telemetry
+    await fetchMetrics()
+  } catch (err) {
+    console.error('Error toggling AI:', err)
+    pageError.value = err.message
+  } finally {
+    togglingAi.value = false
+  }
+}
+
 const handleSaveSettings = async () => {
   settingsError.value = ''
   savingSettings.value = true
@@ -373,7 +537,8 @@ const handleSaveSettings = async () => {
         opening_time: settingsForm.opening_time,
         closing_time: settingsForm.closing_time,
         max_discount_qty: settingsForm.max_discount_qty,
-        default_decay_rate: settingsForm.default_decay_rate
+        default_decay_rate: settingsForm.default_decay_rate,
+        ai_enabled: settingsForm.ai_enabled
       })
     })
 

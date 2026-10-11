@@ -318,12 +318,12 @@ function handleResolveSubmission($pdo) {
 
 function handleGetSettings($pdo) {
     try {
-        $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, updated_at FROM settings WHERE id = 1");
+        $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
         $settings = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$settings) {
-            $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate) VALUES (1, 30, '07:00', '20:00', 5, 10.00)");
-            $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, updated_at FROM settings WHERE id = 1");
+            $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, 30, '07:00', '20:00', 5, 10.00, 1)");
+            $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
             $settings = $stmt->fetch(PDO::FETCH_ASSOC);
         }
 
@@ -335,6 +335,7 @@ function handleGetSettings($pdo) {
                 'closing_time' => $settings['closing_time'],
                 'max_discount_qty' => (int)$settings['max_discount_qty'],
                 'default_decay_rate' => (float)$settings['default_decay_rate'],
+                'ai_enabled' => (bool)$settings['ai_enabled'],
                 'updated_at' => $settings['updated_at']
             ]
         ]);
@@ -344,35 +345,34 @@ function handleGetSettings($pdo) {
 }
 
 function handleUpdateSettings($pdo) {
-    $input = json_decode(file_get_contents('php://input'), true);
-    if (!isset($input['reservation_ttl'])) {
-        jsonResponse(['error' => 'Reservation TTL is required.'], 400);
-    }
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
 
-    $reservationTtl = max(1, (int)$input['reservation_ttl']);
-    $openingTime = isset($input['opening_time']) ? trim($input['opening_time']) : '07:00';
-    $closingTime = isset($input['closing_time']) ? trim($input['closing_time']) : '20:00';
-    $maxDiscountQty = isset($input['max_discount_qty']) ? max(0, (int)$input['max_discount_qty']) : 5;
-    $defaultDecayRate = isset($input['default_decay_rate']) ? max(0, (float)$input['default_decay_rate']) : 10.00;
+    // Fetch current settings to preserve any unspecified fields
+    $currStmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+    $current = $currStmt->fetch(PDO::FETCH_ASSOC);
+
+    $reservationTtl = isset($input['reservation_ttl']) ? max(1, (int)$input['reservation_ttl']) : ($current ? (int)$current['reservation_ttl'] : 30);
+    $openingTime = isset($input['opening_time']) ? trim($input['opening_time']) : ($current ? $current['opening_time'] : '07:00');
+    $closingTime = isset($input['closing_time']) ? trim($input['closing_time']) : ($current ? $current['closing_time'] : '20:00');
+    $maxDiscountQty = isset($input['max_discount_qty']) ? max(0, (int)$input['max_discount_qty']) : ($current ? (int)$current['max_discount_qty'] : 5);
+    $defaultDecayRate = isset($input['default_decay_rate']) ? max(0, (float)$input['default_decay_rate']) : ($current ? (float)$current['default_decay_rate'] : 10.00);
+    $aiEnabled = isset($input['ai_enabled']) ? ($input['ai_enabled'] ? 1 : 0) : ($current ? (int)$current['ai_enabled'] : 1);
 
     try {
         $stmt = $pdo->prepare("
             UPDATE settings 
-            SET reservation_ttl = ?, opening_time = ?, closing_time = ?, max_discount_qty = ?, default_decay_rate = ? 
+            SET reservation_ttl = ?, opening_time = ?, closing_time = ?, max_discount_qty = ?, default_decay_rate = ?, ai_enabled = ? 
             WHERE id = 1
         ");
-        $stmt->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate]);
+        $stmt->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate, $aiEnabled]);
 
         // If no row updated, ensure row 1 exists
-        if ($stmt->rowCount() === 0) {
-            $check = $pdo->query("SELECT id FROM settings WHERE id = 1")->fetchColumn();
-            if (!$check) {
-                $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate) VALUES (1, ?, ?, ?, ?, ?)");
-                $ins->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate]);
-            }
+        if ($stmt->rowCount() === 0 && !$current) {
+            $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, ?, ?, ?, ?, ?, ?)");
+            $ins->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate, $aiEnabled]);
         }
 
-        $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, updated_at FROM settings WHERE id = 1");
+        $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
         $updated = $fetchStmt->fetch(PDO::FETCH_ASSOC);
 
         jsonResponse([
@@ -384,6 +384,7 @@ function handleUpdateSettings($pdo) {
                 'closing_time' => $updated['closing_time'],
                 'max_discount_qty' => (int)$updated['max_discount_qty'],
                 'default_decay_rate' => (float)$updated['default_decay_rate'],
+                'ai_enabled' => (bool)$updated['ai_enabled'],
                 'updated_at' => $updated['updated_at']
             ]
         ]);
@@ -436,6 +437,22 @@ function handleGetDashboardMetrics($pdo) {
         $allergensStmt = $pdo->query("SELECT COUNT(*) FROM critical_allergens");
         $totalAllergens = (int)$allergensStmt->fetchColumn();
 
+        // 5. AI Telemetry metrics
+        $aiStmt = $pdo->query("
+            SELECT 
+                COUNT(*) as total_ai_dishes,
+                SUM(CASE WHEN ai_confirmed = 0 OR ai_confirmed IS NULL THEN 1 ELSE 0 END) as unconfirmed_ai_dishes,
+                SUM(CASE WHEN ai_confirmed = 1 THEN 1 ELSE 0 END) as confirmed_ai_dishes
+            FROM menu_items
+        ");
+        $aiData = $aiStmt->fetch(PDO::FETCH_ASSOC);
+
+        $cacheCount = 0;
+        try {
+            $cacheStmt = $pdo->query("SELECT COUNT(*) FROM ai_query_cache");
+            $cacheCount = (int)$cacheStmt->fetchColumn();
+        } catch (Exception $e) {}
+
         jsonResponse([
             'users' => [
                 'total' => (int)$userData['total_users'],
@@ -458,6 +475,11 @@ function handleGetDashboardMetrics($pdo) {
                 'ingredients' => $totalIngredients,
                 'pending_submissions' => $pendingSubmissions,
                 'critical_allergens' => $totalAllergens
+            ],
+            'ai' => [
+                'unconfirmed_dishes' => (int)$aiData['unconfirmed_ai_dishes'],
+                'confirmed_dishes' => (int)$aiData['confirmed_ai_dishes'],
+                'cached_queries' => $cacheCount
             ]
         ]);
     } catch (Exception $e) {
