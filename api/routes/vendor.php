@@ -239,9 +239,23 @@ function handleEnrichDish($pdo) {
     $description = isset($input['description']) ? htmlspecialchars(trim($input['description'])) : '';
     $portion = isset($input['portion']) ? htmlspecialchars(trim($input['portion'])) : '';
 
-    $systemInstruction = "You are a culinary data assistant. You MUST respond with ONLY raw JSON. Do NOT wrap the JSON in markdown code blocks. Return an object with two keys: 'ingredients' (an array of strings listing all primary cooked ingredients) and 'macros' (an object with integer keys: calories, protein_g, carbs_g, fat_g, sodium_mg). CRITICAL RULE: List all actual ingredients accurately, including common allergen foods (e.g., list 'Peanut Butter', 'Shrimp', 'Egg Noodles', 'Soy Sauce' if used in the dish). Do NOT output any allergen keys, allergen tags, or safety disclaimers. Output ingredients and macros only. When listing ingredients, you MUST use names from this approved taxonomy where applicable: [Soy Sauce, Tofu, Shrimp Paste, Shrimp, Crab, Squid, Clams, Peanut Butter, Peanuts, Egg Noodles, Eggs, Milk, Cheese, Butter, Condensed Milk, Evaporated Milk, Flour, Bread, Pasta, Sesame Oil, Sesame Seeds, Fish Sauce, Bangus, Tilapia]. If an ingredient isn't on this list, use a standard culinary name.";
+    $systemInstruction = "You are a precise culinary and nutritional data assistant. You MUST respond with ONLY raw JSON. Do NOT wrap the JSON in markdown code blocks.
+
+VALIDATION & ERROR HANDLING RULE:
+If the dish name is gibberish, not food, incomprehensible, or not a recognizable culinary viand/dish (e.g., 'asdf', 'Dish 1', random characters, non-edible items), you MUST return a JSON object with an 'error' key describing why it failed, and omit 'ingredients' and 'macros'.
+Example failure format:
+{\"error\": \"The input 'asdf' does not appear to be a valid food item.\"}
+
+SUCCESS FORMAT & TAXONOMY RULES:
+For valid food items and dishes, return ONLY a JSON object with two keys:
+1. 'ingredients': An array of strings listing all primary raw and cooked ingredients.
+   - CRITICAL REQUIREMENT: Break down all composite ingredients into their constituent culinary components (e.g., instead of 'Mayonnaise', return 'Eggs', 'Oil', 'Vinegar'; instead of sauces or composite foods, list their constituent raw ingredients). This enables accurate allergen taxonomy mapping.
+   - Whenever applicable, use exact names from this approved taxonomy: [Soy Sauce, Tofu, Shrimp Paste, Shrimp, Crab, Squid, Clams, Peanut Butter, Peanuts, Egg Noodles, Eggs, Milk, Cheese, Butter, Condensed Milk, Evaporated Milk, Flour, Bread, Pasta, Sesame Oil, Sesame Seeds, Fish Sauce, Bangus, Tilapia]. If an ingredient is not in this list, use its standard single-ingredient culinary name.
+2. 'macros': An object with integer values for: 'calories', 'protein_g', 'carbs_g', 'fat_g', 'sodium_mg'.
+
+Do NOT output any allergen keys, allergen tags, or markdown formatting. Output raw JSON only.";
     
-    $userPrompt = "Dish Name: $dishName\nDescription: $description\nPortion: $portion\nReference Source: USDA National Nutrient Database\nGenerate the ingredients and macros JSON.";
+    $userPrompt = "Dish Name: $dishName\nDescription: $description\nPortion: $portion\nReference Source: USDA National Nutrient Database\nEvaluate the dish and generate the required JSON.";
 
     $payload = [
         "system_instruction" => [
@@ -283,13 +297,32 @@ function handleEnrichDish($pdo) {
     
     // Extract the text from the Gemini response
     if (isset($responseData['candidates'][0]['content']['parts'][0]['text'])) {
-        $aiText = $responseData['candidates'][0]['content']['parts'][0]['text'];
+        $aiText = trim($responseData['candidates'][0]['content']['parts'][0]['text']);
+        // Strip markdown code fences if present
+        if (strpos($aiText, '```') !== false) {
+            $aiText = preg_replace('/^```(?:json)?\s*/i', '', $aiText);
+            $aiText = preg_replace('/\s*```$/', '', $aiText);
+            $aiText = trim($aiText);
+        }
+
         $aiJson = json_decode($aiText, true);
         
-        if (json_last_error() === JSON_ERROR_NONE && isset($aiJson['ingredients']) && isset($aiJson['macros'])) {
-            $insertStmt = $pdo->prepare("INSERT IGNORE INTO ai_query_cache (dish_name, response_payload) VALUES (?, ?)");
-            $insertStmt->execute([$sanitizedDishName, json_encode($aiJson)]);
-            jsonResponse($aiJson, 200);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($aiJson)) {
+            // Check if the AI returned a gibberish/non-food error
+            if (!empty($aiJson['error'])) {
+                jsonResponse(['error' => $aiJson['error']], 400);
+            }
+
+            // Validate that ingredients is an array and macros is an object/array
+            if (isset($aiJson['ingredients']) && is_array($aiJson['ingredients']) &&
+                isset($aiJson['macros']) && is_array($aiJson['macros'])) {
+                
+                // Do not cache failed or errored generations. Only cache successful, valid JSON outputs
+                $insertStmt = $pdo->prepare("INSERT IGNORE INTO ai_query_cache (dish_name, response_payload) VALUES (?, ?)");
+                $insertStmt->execute([$sanitizedDishName, json_encode($aiJson)]);
+                
+                jsonResponse($aiJson, 200);
+            }
         }
     }
     
