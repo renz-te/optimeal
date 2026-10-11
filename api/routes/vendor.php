@@ -337,8 +337,8 @@ function handleSaveDish($pdo) {
             $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$dishId]);
         } else {
             $stmt = $pdo->prepare("
-                INSERT INTO menu_items (store_id, name, description, category, dietary, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO menu_items (store_id, name, description, category, dietary, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ");
             $stmt->execute([
                 $store_id,
@@ -458,4 +458,95 @@ function handleLaunchMenu($pdo) {
         $pdo->rollBack();
         jsonResponse(['error' => 'Failed to launch menu: ' . $e->getMessage()], 500);
     }
+}
+
+function handleGetVendorMenu($pdo) {
+    $store_id = requireVendor($pdo);
+
+    $stmt = $pdo->prepare("
+        SELECT m.id, m.store_id, m.name, m.description, m.category, m.dietary, 
+               m.base_price, m.price_floor, m.image_url, m.calories, m.protein_g, 
+               m.carbs_g, m.fat_g, m.sodium_mg, m.ai_confirmed, m.is_active,
+               i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
+               pr.rush_hour_end_time, pr.decay_start_offset_minutes, pr.decay_rate_percent, 
+               pr.decay_interval_minutes, pr.min_stock_to_trigger_decay
+        FROM menu_items m
+        LEFT JOIN inventory i ON m.id = i.menu_item_id
+        LEFT JOIN pricing_rules pr ON m.id = pr.menu_item_id
+        WHERE m.store_id = ?
+        ORDER BY m.id DESC
+    ");
+    $stmt->execute([$store_id]);
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $result = [];
+    foreach ($items as $item) {
+        $ingStmt = $pdo->prepare("
+            SELECT ing.name 
+            FROM menu_item_ingredients mii 
+            JOIN ingredients ing ON mii.ingredient_id = ing.id 
+            WHERE mii.menu_item_id = ?
+        ");
+        $ingStmt->execute([$item['id']]);
+        $ingredients = $ingStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $astmt = $pdo->prepare("
+            SELECT ca.name 
+            FROM menu_item_critical_allergens mca
+            JOIN critical_allergens ca ON mca.allergen_id = ca.id
+            WHERE mca.menu_item_id = ?
+        ");
+        $astmt->execute([$item['id']]);
+        $allergens = $astmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $sstmt = $pdo->prepare("
+            SELECT ds.name 
+            FROM menu_item_digestive_sensitivities mids
+            JOIN digestive_sensitivities ds ON mids.sensitivity_id = ds.id
+            WHERE mids.menu_item_id = ?
+        ");
+        $sstmt->execute([$item['id']]);
+        $sensitivities = $sstmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $dietary = [];
+        if (!empty($item['dietary'])) {
+            $decoded = json_decode($item['dietary'], true);
+            if (is_array($decoded)) {
+                $dietary = $decoded;
+            }
+        }
+
+        $macros = null;
+        if ($item['calories'] !== null) {
+            $macros = [
+                'calories' => (int)$item['calories'],
+                'protein_g' => (int)$item['protein_g'],
+                'carbs_g' => (int)$item['carbs_g'],
+                'fat_g' => (int)$item['fat_g'],
+                'sodium_mg' => (int)$item['sodium_mg'],
+            ];
+        }
+
+        $result[] = [
+            'id' => (int)$item['id'],
+            'name' => $item['name'],
+            'description' => $item['description'] ?? '',
+            'category' => $item['category'] ?? 'Uncategorized',
+            'dietary' => $dietary,
+            'base_price' => (float)$item['base_price'],
+            'current_price' => (float)$item['base_price'],
+            'stock' => isset($item['online_pool_qty']) ? (int)$item['online_pool_qty'] : 10,
+            'walkin_pool_qty' => isset($item['walkin_pool_qty']) ? (int)$item['walkin_pool_qty'] : 0,
+            'online_pool_qty' => isset($item['online_pool_qty']) ? (int)$item['online_pool_qty'] : 0,
+            'delisted_from_app' => isset($item['delisted_from_app']) ? (int)$item['delisted_from_app'] : 0,
+            'is_active' => (int)$item['is_active'],
+            'ai_confirmed' => (bool)$item['ai_confirmed'],
+            'ingredients' => $ingredients,
+            'allergens' => $allergens,
+            'sensitivities' => $sensitivities,
+            'macros' => $macros
+        ];
+    }
+
+    jsonResponse($result);
 }

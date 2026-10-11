@@ -41,35 +41,55 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { useSandbox } from '../../stores/sandbox'
+import { ref, onMounted } from 'vue'
 
-const { sandboxMenu } = useSandbox()
 const inventory = ref([])
+const loading = ref(false)
 
-onMounted(() => {
-  syncInventory()
-})
-
-watch(sandboxMenu, () => {
-  syncInventory()
-}, { deep: true })
-
-const syncInventory = () => {
-  inventory.value = sandboxMenu.value.map(item => ({
-    id: item.id,
-    menu_item_id: item.id,
-    item_name: item.name,
-    walkin_pool_qty: item.stock,
-    online_pool_qty: item.stock,
-    available_online: item.stock > 0
-  }))
+const fetchLiveStock = async () => {
+  loading.value = true
+  try {
+    const res = await fetch('/api/vendor/menu')
+    if (res.ok) {
+      const data = await res.json()
+      inventory.value = data
+        .filter(item => item.is_active === 1)
+        .map(item => ({
+          id: item.id,
+          menu_item_id: item.id,
+          item_name: item.name,
+          walkin_pool_qty: item.walkin_pool_qty ?? 0,
+          online_pool_qty: item.online_pool_qty ?? 0,
+          available_online: (item.online_pool_qty ?? 0) > 0 && !item.delisted_from_app
+        }))
+    }
+  } catch (err) {
+    console.error('Failed to load vendor inventory:', err)
+  } finally {
+    loading.value = false
+  }
 }
 
-const saveInventory = (item) => {
-  const dish = sandboxMenu.value.find(d => d.id === item.menu_item_id)
-  if (dish) {
-    dish.stock = item.available_online ? item.online_pool_qty : 0
+onMounted(() => {
+  fetchLiveStock()
+})
+
+const saveInventory = async (item) => {
+  try {
+    const res = await fetch('/api/vendor/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        menu_item_id: item.menu_item_id,
+        walkin_pool_qty: item.walkin_pool_qty,
+        online_pool_qty: item.available_online ? item.online_pool_qty : 0
+      })
+    })
+    if (res.ok) {
+      await fetchLiveStock()
+    }
+  } catch (err) {
+    console.error('Failed to update inventory:', err)
   }
 }
 </script>

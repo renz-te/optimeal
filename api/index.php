@@ -81,6 +81,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/dish' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSaveDish($pdo);
+} elseif ($route === '/vendor/menu' && $method === 'GET') {
+    require 'routes/vendor.php';
+    handleGetVendorMenu($pdo);
 } elseif ($route === '/vendor/menu/launch' && $method === 'POST') {
     require 'routes/vendor.php';
     handleLaunchMenu($pdo);

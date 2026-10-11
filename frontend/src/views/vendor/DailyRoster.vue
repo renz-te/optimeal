@@ -318,23 +318,32 @@ const enrichDish = async () => {
   }
 }
 
+const fetchVendorCatalog = async () => {
+  try {
+    const res = await fetch('/api/vendor/menu')
+    if (res.ok) {
+      const data = await res.json()
+      masterCatalog.value = data
+      initRoster()
+    }
+  } catch (err) {
+    console.error('Failed to load vendor catalog:', err)
+  }
+}
+
 const initRoster = () => {
-  // Try to match active sandbox menu to catalog
-  const currentMenuIds = sandboxMenu.value.map(d => d.id)
-  
   activeRoster.value = masterCatalog.value.map(dish => {
-    const existing = sandboxMenu.value.find(m => m.id === dish.id)
     return {
       ...dish,
-      selected: !!existing,
-      stock: existing ? existing.stock : 10,
-      current_price: existing ? existing.current_price : dish.base_price,
+      selected: dish.is_active === 1,
+      stock: dish.stock !== undefined ? dish.stock : (dish.online_pool_qty !== undefined ? dish.online_pool_qty : 10),
+      current_price: dish.current_price !== undefined ? dish.current_price : dish.base_price,
     }
   })
 }
 
 onMounted(() => {
-  initRoster()
+  fetchVendorCatalog()
 })
 
 watch(masterCatalog, () => {
