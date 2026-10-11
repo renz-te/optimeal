@@ -5,7 +5,7 @@ $baseUrl = 'http://127.0.0.1/optimeal/api';
 $cookieFileVendor = __DIR__ . '/cookie_vendor_c5.txt';
 if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
 
-require_once __DIR__ . '/api/db.php';
+require_once __DIR__ . '/../api/db.php';
 
 function apiRequest($url, $method = 'GET', $data = null, $cookieFile = null) {
     $ch = curl_init($url);

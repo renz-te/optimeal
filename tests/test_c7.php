@@ -8,7 +8,7 @@ $cookieFileStudent = __DIR__ . '/cookie_student_c7.txt';
 if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
 if (file_exists($cookieFileStudent)) unlink($cookieFileStudent);
 
-require_once __DIR__ . '/api/db.php';
+require_once __DIR__ . '/../api/db.php';
 date_default_timezone_set('Asia/Manila');
 
 function apiRequest($url, $method = 'GET', $data = null, $cookieFile = null) {

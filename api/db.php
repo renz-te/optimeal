@@ -4,6 +4,7 @@ $db   = 'optimeal';
 $user = 'root';
 $pass = '';
 $charset = 'utf8mb4';
+date_default_timezone_set('Asia/Manila');
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
 $options = [
@@ -13,6 +14,7 @@ $options = [
 ];
 try {
      $pdo = new PDO($dsn, $user, $pass, $options);
+     $pdo->exec("SET time_zone = '+08:00'");
 } catch (\PDOException $e) {
      throw new \PDOException($e->getMessage(), (int)$e->getCode());
 }

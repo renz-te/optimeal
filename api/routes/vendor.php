@@ -109,7 +109,7 @@ function handleGetOrders($pdo) {
     
     $stmt = $pdo->prepare("
         SELECT o.id, o.user_id, o.status, o.total_amount, o.claim_token, o.reserved_at,
-               o.fulfillment_type, o.handled_by, u.name as customer_name
+               o.fulfillment_type, o.handled_by, o.allergen_override, o.allergen_conflicts, u.name as customer_name
         FROM orders o
         JOIN users u ON o.user_id = u.id
         WHERE o.store_id = ? AND o.status IN ('reserved', 'paid', 'claimed')
@@ -162,7 +162,7 @@ function handleUpdateOrderStatus($pdo) {
     try {
         $pdo->beginTransaction();
 
-        $checkStmt = $pdo->prepare("SELECT id, status FROM orders WHERE id = ? AND store_id = ? FOR UPDATE");
+        $checkStmt = $pdo->prepare("SELECT id, status, allergen_override, allergen_conflicts FROM orders WHERE id = ? AND store_id = ? FOR UPDATE");
         $checkStmt->execute([$order_id, $store_id]);
         $order = $checkStmt->fetch();
 
@@ -173,6 +173,15 @@ function handleUpdateOrderStatus($pdo) {
         // Prevent changing status if already cancelled or completed
         if (in_array($order['status'], ['cancelled', 'completed'])) {
             throw new Exception("Cannot change status of a " . $order['status'] . " order.");
+        }
+
+        // Restrict "Mark Claimed" action if allergen_override is active until confirmed by staff
+        if (in_array($status, ['claimed', 'completed']) && !empty($order['allergen_override'])) {
+            $staffConfirmed = !empty($input['confirm_allergen_override']) || !empty($input['allergen_confirmed']);
+            if (!$staffConfirmed) {
+                $conflicts = !empty($order['allergen_conflicts']) ? $order['allergen_conflicts'] : 'undisclosed allergens';
+                throw new Exception("Allergen Warning: This order has an active allergen override ($conflicts). Staff confirmation is required to mark it as claimed.");
+            }
         }
 
         $staffUserId = $_SESSION['user_id'];
@@ -745,14 +754,15 @@ function handleGetDailyAudit($pdo) {
     $stmtOrders->execute([$store_id]);
     $orderSummary = $stmtOrders->fetch(PDO::FETCH_ASSOC);
 
-    // 2. Unsold live inventory / waste for active dishes
+    // 2. Unsold live inventory / waste for active dishes (including Walk-in Pool)
     $inventoryQuery = "
         SELECT 
             m.id, 
             m.name, 
             m.category, 
             m.base_price, 
-            i.online_pool_qty AS remaining_stock,
+            (i.online_pool_qty + i.walkin_pool_qty) AS remaining_stock,
+            i.online_pool_qty,
             i.walkin_pool_qty,
             i.cooked_at,
             i.sell_by,
@@ -760,7 +770,7 @@ function handleGetDailyAudit($pdo) {
                 WHEN i.sell_by IS NOT NULL AND i.sell_by <= NOW() THEN 1 
                 ELSE 0 
             END AS is_expired,
-            ROUND(m.base_price * i.online_pool_qty, 2) AS estimated_waste_value
+            ROUND(m.base_price * (i.online_pool_qty + i.walkin_pool_qty), 2) AS estimated_waste_value
         FROM menu_items m
         JOIN inventory i ON m.id = i.menu_item_id
         WHERE m.store_id = ? AND m.is_active = 1

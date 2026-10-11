@@ -91,7 +91,7 @@ $enableAI = apiRequest("$baseUrl/admin/settings", 'POST', [
 echo "   Status: {$enableAI['code']}, Msg: " . ($enableAI['body']['message'] ?? $enableAI['raw']) . "\n";
 assert($enableAI['code'] === 200, "Failed to re-enable AI");
 
-require_once __DIR__ . '/api/db.php';
+require_once __DIR__ . '/../api/db.php';
 $pdo->exec("DELETE FROM ingredient_submissions WHERE raw_name IN ('Cybernetic Tomatoes', 'Quantum Pepper')");
 
 // 6. Vendor saves a dish with recognized + unrecognized ingredients (e.g. 'Cybernetic Tomatoes')

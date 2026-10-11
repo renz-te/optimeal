@@ -165,6 +165,9 @@
                 <span :class="{'text-rose-600 font-black': item.remaining_stock === 0}">
                   {{ item.remaining_stock }}
                 </span>
+                <span v-if="item.online_pool_qty !== undefined && item.walkin_pool_qty !== undefined" class="block text-[11px] font-normal text-slate-400">
+                  ({{ item.online_pool_qty }} online &bull; {{ item.walkin_pool_qty }} walk-in)
+                </span>
               </td>
               <td class="px-6 py-4 text-right font-medium text-slate-600">
                 ₱{{ formatMoney(item.base_price) }}

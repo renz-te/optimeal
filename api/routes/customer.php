@@ -223,6 +223,9 @@ function handleCreateReservation($pdo) {
     $profileRow = $stmtProfile->fetch(PDO::FETCH_ASSOC);
     $userAllergens = $profileRow ? (json_decode($profileRow['allergens'] ?? '[]', true) ?: []) : [];
 
+    $isAllergenOverride = 0;
+    $allergenConflictsJson = null;
+
     if (!empty($userAllergens) && count($input['items']) > 0) {
         $itemIds = array_values(array_filter(array_map(function($i) {
             return isset($i['menu_item_id']) ? (int)$i['menu_item_id'] : 0;
@@ -297,9 +300,13 @@ function handleCreateReservation($pdo) {
                 if (!$hasOverride) {
                     $conflictList = implode(', ', $conflictingAllergens);
                     jsonResponse([
-                        'error' => "Safety Restriction: Cart contains $conflictList. You must acknowledge the risk to proceed."
+                        'error' => "Safety Restriction: Cart contains $conflictList. You must acknowledge the risk to proceed.",
+                        'conflicting_allergens' => $conflictingAllergens
                     ], 400);
                 }
+                // Only store allergen_override = 1 if conflicts were actually found by the server
+                $isAllergenOverride = 1;
+                $allergenConflictsJson = json_encode($conflictingAllergens);
             }
         }
     }
@@ -318,8 +325,8 @@ function handleCreateReservation($pdo) {
             ? $input['fulfillment_type'] 
             : 'dine_in';
         $reservationTtl = isset($settings['reservation_ttl']) ? max(1, (int)$settings['reservation_ttl']) : 30;
-        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token, fulfillment_type) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?)");
-        $insertOrder->execute([$user_id, $store_id, $reservationTtl, $claimToken, $fulfillment_type]);
+        $insertOrder = $pdo->prepare("INSERT INTO orders (user_id, store_id, status, ttl_expires_at, claim_token, fulfillment_type, allergen_override, allergen_conflicts) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?, ?, ?)");
+        $insertOrder->execute([$user_id, $store_id, $reservationTtl, $claimToken, $fulfillment_type, $isAllergenOverride, $allergenConflictsJson]);
         $order_id = $pdo->lastInsertId();
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
@@ -446,7 +453,7 @@ function handlePayReservation($pdo, $order_id) {
 function handleGetCustomerOrders($pdo) {
     $user_id = requireCustomer($pdo);
     
-    $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
+    $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, allergen_override, allergen_conflicts FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
     $stmt->execute([$user_id]);
     jsonResponse($stmt->fetchAll());
 }
@@ -455,7 +462,7 @@ function handleGetMyOrders($pdo) {
     $user_id = requireCustomer($pdo);
 
     $stmt = $pdo->prepare("
-        SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type
+        SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, allergen_override, allergen_conflicts
         FROM orders
         WHERE user_id = ?
         ORDER BY reserved_at DESC

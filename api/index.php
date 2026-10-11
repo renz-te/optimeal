@@ -1,6 +1,7 @@
 <?php
 ini_set('display_errors', 0);
 error_reporting(0);
+date_default_timezone_set('Asia/Manila');
 session_start();
 header('Content-Type: application/json');
 
