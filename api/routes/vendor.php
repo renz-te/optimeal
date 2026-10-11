@@ -183,9 +183,9 @@ function handleUpdateOrderStatus($pdo) {
             $itemStmt->execute([$order_id]);
             $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $restoreStmt = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty + ? WHERE menu_item_id = ?");
+            $restoreStmt = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty + ?, delisted_from_app = CASE WHEN online_pool_qty + ? > critical_stock_threshold THEN 0 ELSE delisted_from_app END WHERE menu_item_id = ?");
             foreach ($items as $item) {
-                $restoreStmt->execute([$item['quantity'], $item['menu_item_id']]);
+                $restoreStmt->execute([$item['quantity'], $item['quantity'], $item['menu_item_id']]);
             }
         }
 

@@ -480,7 +480,7 @@ const saveDish = async () => {
   }
 }
 
-const launchMenu = () => {
+const launchMenu = async () => {
   const selectedItems = activeRoster.value.filter(r => r.selected)
   
   const newMenu = selectedItems.map(item => ({
@@ -501,6 +501,27 @@ const launchMenu = () => {
   }))
   
   sandboxMenu.value = newMenu
+
+  try {
+    const res = await fetch('/api/vendor/menu/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store_id: 1,
+        items: selectedItems.map(item => ({
+          menu_item_id: item.id,
+          stock: item.stock
+        }))
+      })
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      console.warn('Backend launch menu failed:', data.error)
+    }
+  } catch (err) {
+    console.warn('Backend launch menu error:', err)
+  }
+
   showToast("Today's lineup has been published successfully.", "success")
   launchState.value = 'success'
   setTimeout(() => {

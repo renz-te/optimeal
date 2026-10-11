@@ -11,10 +11,11 @@ require_once 'PricingEngine.php';
 $method = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-// Base path handler if running via subfolder in Laragon
-$basepath = '/optimeal/api';
-if (strpos($path, $basepath) === 0) {
-    $route = substr($path, strlen($basepath));
+// Base path handler if running via subfolder in Laragon or Virtual Host
+if (strpos($path, '/optimeal/api') === 0) {
+    $route = substr($path, strlen('/optimeal/api'));
+} elseif (strpos($path, '/api') === 0) {
+    $route = substr($path, strlen('/api'));
 } else {
     $route = $path; // fallback
 }
