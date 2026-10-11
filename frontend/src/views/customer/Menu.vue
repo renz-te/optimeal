@@ -60,9 +60,26 @@
       <div v-for="item in displayDishes" :key="item.id" 
            class="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow relative overflow-hidden flex flex-col"
            :class="[
-             (item.allergens && item.allergens.length > 0) ? 'opacity-80' : '',
-             getMatches(item).length > 0 ? 'opacity-75 border-2 border-rose-200 bg-rose-50/30' : 'border border-slate-200'
+             getDietaryConflicts(item).hasCriticalAllergen 
+               ? 'border-2 border-red-500 bg-red-50/20 ring-1 ring-red-400' 
+               : (getDietaryConflicts(item).hasSensitivity 
+                   ? 'border-2 border-amber-300 bg-amber-50/20' 
+                   : 'border border-slate-200')
            ]">
+
+        <!-- Severe Visual Warning Banner -->
+        <div v-if="getDietaryConflicts(item).hasCriticalAllergen" 
+             class="bg-red-600 text-white text-xs font-black px-3.5 py-2 flex items-center justify-between shadow-md relative z-10">
+          <div class="flex items-center gap-1.5 truncate">
+            <AlertTriangle :size="15" class="shrink-0 text-red-100 animate-pulse" />
+            <span class="truncate uppercase tracking-wide">⚠️ CONTAINS YOUR ALLERGEN: {{ getDietaryConflicts(item).criticalAllergens.join(', ') }}</span>
+          </div>
+        </div>
+        <div v-else-if="getDietaryConflicts(item).hasSensitivity" 
+             class="bg-amber-500 text-white text-xs font-bold px-3.5 py-1.5 flex items-center gap-1.5 shadow-sm relative z-10">
+          <Info :size="14" class="shrink-0 text-amber-100" />
+          <span class="truncate">Notice: Contains {{ getDietaryConflicts(item).sensitivities.join(', ') }}</span>
+        </div>
            
         <div class="h-40 bg-slate-100 w-full relative">
           <!-- Image placeholder -->
@@ -70,7 +87,17 @@
             <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
           </div>
           <!-- Real image if exists -->
-          <img v-else :src="item.image_url" class="w-full h-full object-cover" :alt="item.name">
+          <img v-else :src="item.image_url" 
+               class="w-full h-full object-cover transition-all" 
+               :class="getDietaryConflicts(item).hasCriticalAllergen ? 'opacity-30 grayscale filter contrast-125' : (getDietaryConflicts(item).hasSensitivity ? 'opacity-75' : '')" 
+               :alt="item.name">
+
+          <!-- Dim Overlay Badge for Critical Allergens -->
+          <div v-if="getDietaryConflicts(item).hasCriticalAllergen" class="absolute inset-0 flex items-center justify-center bg-red-950/20 pointer-events-none">
+            <span class="bg-red-600/95 text-white text-[11px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 border border-red-400">
+              <AlertTriangle :size="13" /> Allergen Restricted
+            </span>
+          </div>
 
           <div v-if="isClearance(item)" class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center">
             <Clock :size="14" class="mr-1" />
@@ -127,9 +154,19 @@
           </div>
 
           <button @click="openItemModal(item)" class="w-full font-bold py-3 rounded-lg transition-all shadow-sm flex items-center justify-center" 
-                  :class="item.stock > 0 ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
+                  :class="[
+                    item.stock <= 0 
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                      : (getDietaryConflicts(item).hasCriticalAllergen 
+                          ? 'bg-rose-50 border-2 border-rose-300 text-rose-700 hover:bg-rose-100' 
+                          : 'bg-emerald-600 text-white hover:bg-emerald-700')
+                  ]"
                   :disabled="item.stock <= 0">
-            {{ item.stock > 0 ? 'Select Options' : 'Sold Out' }}
+            <template v-if="item.stock <= 0">Sold Out</template>
+            <template v-else-if="getDietaryConflicts(item).hasCriticalAllergen">
+              <AlertTriangle :size="16" class="mr-1.5 text-rose-600" /> Review Allergen Warning
+            </template>
+            <template v-else>Select Options</template>
           </button>
         </div>
       </div>
@@ -261,12 +298,41 @@
             </div>
           </div>
 
+          <!-- Severe Allergen Warning & Override Checkbox -->
+          <div v-if="getDietaryConflicts(selectedItem).hasCriticalAllergen" class="bg-rose-50 border-2 border-rose-300 rounded-xl p-3.5 text-rose-950 shadow-sm space-y-2.5 w-full text-left">
+            <div class="flex items-start gap-2">
+              <AlertTriangle :size="18" class="text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <div class="font-black text-xs uppercase tracking-wide text-rose-900">
+                  CRITICAL ALLERGEN CONFLICT
+                </div>
+                <p class="text-[11px] text-rose-800 font-medium leading-tight mt-0.5">
+                  Contains <span class="font-black underline">{{ getDietaryConflicts(selectedItem).criticalAllergens.join(', ') }}</span> matching your saved allergy profile. Consuming this meal poses severe health risks.
+                </p>
+              </div>
+            </div>
+            <label class="flex items-start gap-2 pt-2 border-t border-rose-200 cursor-pointer select-none">
+              <input type="checkbox" v-model="dishRiskOverride" class="mt-0.5 rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer">
+              <span class="text-xs font-bold text-rose-900 leading-snug">
+                I understand the risks and explicitly choose to override this warning for this dish.
+              </span>
+            </label>
+          </div>
+
           <button @click="addToCart" 
                   class="w-full py-3.5 rounded-lg font-semibold tabular-nums shadow-md transition-all flex justify-center items-center text-lg"
-                  :class="selectedItem.stock > 0 ? 'bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95' : 'bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none'"
-                  :disabled="selectedItem.stock <= 0">
-            <template v-if="selectedItem.stock > 0">Add to Plate &bull; ₱{{ (selectedItem.current_price * quantity).toFixed(2) }}</template>
-            <template v-else>Sold Out</template>
+                  :class="canAddSelectedItem ? (getDietaryConflicts(selectedItem).hasCriticalAllergen ? 'bg-rose-600 text-white hover:bg-rose-700 active:scale-95' : 'bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95') : 'bg-slate-300 text-slate-500 cursor-not-allowed pointer-events-none'"
+                  :disabled="!canAddSelectedItem">
+            <template v-if="selectedItem.stock <= 0">Sold Out</template>
+            <template v-else-if="getDietaryConflicts(selectedItem).hasCriticalAllergen && !dishRiskOverride">
+              ⚠️ Allergen Restricted (Check Override)
+            </template>
+            <template v-else-if="getDietaryConflicts(selectedItem).hasCriticalAllergen && dishRiskOverride">
+              Add to Plate (Risk Overridden) &bull; ₱{{ (selectedItem.current_price * quantity).toFixed(2) }}
+            </template>
+            <template v-else>
+              Add to Plate &bull; ₱{{ (selectedItem.current_price * quantity).toFixed(2) }}
+            </template>
           </button>
         </div>
 
@@ -601,6 +667,8 @@ watch(cart, (newItems) => {
 }, { deep: true })
 
 const dangerAcknowledged = ref(false)
+const studentProfile = ref(null)
+const dishRiskOverride = ref(false)
 const categories = ['All', 'Sabaw / Soup', 'Ulam / Stews', 'Prito / Fried', 'Gulay & Veg', 'Dessert / Snacks']
 const selectedCategory = ref('All')
 const maxCalories = ref(null)
@@ -696,6 +764,24 @@ watch(menuItems, () => {
   reconcileCart()
 }, { deep: true })
 
+const fetchProfile = async () => {
+  if (isAdmin.value && activePreviewMode.value === 'customer') {
+    return; // Rely on sandbox
+  }
+  try {
+    const res = await fetch('/api/customer/profile')
+    if (res.ok) {
+      studentProfile.value = await res.json()
+    } else {
+      // Gracefully degrade for non-students (e.g. vendor/admin testing or guests)
+      studentProfile.value = null
+    }
+  } catch (e) {
+    console.warn('Could not load student profile:', e)
+    studentProfile.value = null
+  }
+}
+
 const fetchMenu = async () => {
   if (isAdmin.value && activePreviewMode.value === 'customer') {
     return; // Rely on sandbox data
@@ -711,6 +797,7 @@ const fetchMenu = async () => {
 }
 
 onMounted(() => {
+  fetchProfile()
   fetchMenu()
   reconcileCart()
   
@@ -793,63 +880,193 @@ const calculateDiscountPercent = (item) => {
   return Math.round(((item.base_price - item.current_price) / item.base_price) * 100)
 }
 
-function getMatches(item) {
-  let userFlags = [];
-  let watchlist = [];
-  
-  if (isAdmin.value && activePreviewMode.value === 'customer') {
-    const rawFlags = simulatedDietaryFlags.value;
-    userFlags = [...(rawFlags.allergens || []), ...(rawFlags.sensitivities || []), ...(rawFlags.dietary || [])];
-    watchlist = rawFlags.custom_watchlist || [];
-  } else {
-    const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}');
-    const rawFlags = user.dietary_flags || {};
-    userFlags = Array.isArray(rawFlags) 
-      ? rawFlags 
-      : [...(rawFlags.allergens || []), ...(rawFlags.sensitivities || []), ...(rawFlags.dietary || [])];
-    watchlist = Array.isArray(rawFlags) ? [] : (rawFlags.custom_watchlist || []);
+// Client-Side Conflict Engine: Intersects dish mapped allergens & sensitivities with saved profile
+const getDietaryConflicts = (dish) => {
+  if (!dish) {
+    return {
+      hasConflict: false,
+      hasCriticalAllergen: false,
+      hasSensitivity: false,
+      criticalAllergens: [],
+      sensitivities: [],
+      watchlist: [],
+      all: []
+    }
   }
 
-  const matched = [];
+  let userAllergens = []
+  let userSensitivities = []
+  let userDietary = []
+  let userWatchlist = []
 
-  // 1. Structured tag matching
-  const itemAllergens = item.critical_allergens || item.allergens || [];
-  itemAllergens.forEach(a => { if (userFlags.includes(a)) matched.push(a); });
-  
-  const itemSensitivities = item.digestive_sensitivities || item.sensitivities || [];
-  itemSensitivities.forEach(s => { if (userFlags.includes(s)) matched.push(s); });
-
-  // Handle dietary boundary exclusions
-  if (userFlags.includes('No Pork') && (item.dietary || []).includes('Pork')) matched.push('Pork');
-  if (userFlags.includes('No Beef') && (item.dietary || []).includes('Beef')) matched.push('Beef');
-  if (userFlags.includes('Vegetarian / Plant-Based') && !(item.dietary || []).includes('Vegetarian / Plant-Based')) matched.push('Non-Vegetarian');
-
-  // 2. Custom Watchlist / Ingredients text scan
-  watchlist.forEach(term => {
-    const lowerTerm = term.toLowerCase().trim();
-    if (!lowerTerm) return;
-    const inIngredients = (item.ingredients || []).some(i => i.toLowerCase().includes(lowerTerm));
-    const inName = item.name.toLowerCase().includes(lowerTerm);
-    if (inIngredients || inName) {
-      matched.push(`Watchlist: [${term}]`);
+  if (isAdmin.value && activePreviewMode.value === 'customer') {
+    const rawFlags = simulatedDietaryFlags.value || {}
+    userAllergens = rawFlags.allergens || []
+    userSensitivities = rawFlags.sensitivities || []
+    userDietary = rawFlags.dietary || []
+    userWatchlist = rawFlags.custom_watchlist || []
+  } else if (studentProfile.value) {
+    userAllergens = studentProfile.value.allergens || []
+    userSensitivities = studentProfile.value.sensitivities || []
+    userDietary = studentProfile.value.dietary_boundaries || []
+    userWatchlist = studentProfile.value.custom_watchlist || []
+  } else {
+    const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}')
+    const rawFlags = user.dietary_flags || {}
+    if (Array.isArray(rawFlags)) {
+      userAllergens = rawFlags
+    } else {
+      userAllergens = rawFlags.allergens || []
+      userSensitivities = rawFlags.sensitivities || []
+      userDietary = rawFlags.dietary || []
+      userWatchlist = rawFlags.custom_watchlist || []
     }
-  });
+  }
 
-  return matched;
+  const dishAllergens = (dish.critical_allergens || dish.allergens || dish.mapped_allergens || []).map(a => typeof a === 'string' ? a.trim() : (a.name || ''))
+  const dishSensitivities = (dish.digestive_sensitivities || dish.sensitivities || []).map(s => typeof s === 'string' ? s.trim() : (s.name || ''))
+  const dishIngredients = (dish.ingredients || []).map(i => typeof i === 'string' ? i.trim() : (i.name || ''))
+  const dishDietary = dish.dietary || []
+
+  // Allergen keyword mapping for deep ingredient cross-referencing
+  const allergenKeywords = {
+    'dairy': ['dairy', 'milk', 'cheese', 'butter', 'cream', 'condensed milk', 'evaporated milk', 'curd', 'whey', 'yogurt'],
+    'peanuts': ['peanut', 'peanuts', 'peanut butter'],
+    'eggs': ['egg', 'eggs', 'egg noodles', 'mayo', 'mayonnaise'],
+    'fish': ['fish', 'fish sauce', 'bangus', 'tilapia', 'tuna', 'salmon'],
+    'soy': ['soy', 'soy sauce', 'tofu', 'edamame', 'miso'],
+    'shellfish / crustaceans': ['shellfish', 'crustaceans', 'shrimp', 'crab', 'squid', 'clams', 'prawn', 'lobster', 'oyster'],
+    'shrimp paste (bagoong)': ['shrimp paste', 'bagoong', 'alamang'],
+    'wheat/gluten': ['wheat', 'gluten', 'flour', 'bread', 'pasta', 'noodles', 'bun', 'buns'],
+    'sesame': ['sesame', 'sesame oil', 'sesame seeds']
+  }
+
+  const sensitivityKeywords = {
+    'coconut milk (gata)': ['coconut milk', 'gata', 'coconut cream'],
+    'coconut milk/gata': ['coconut milk', 'gata', 'coconut cream'],
+    'spicy / capsaicin': ['chili', 'chilies', 'chili peppers', 'capsaicin', 'spicy', 'hot pepper'],
+    'hot pepper/capsaicin': ['chili', 'chilies', 'chili peppers', 'capsaicin', 'spicy', 'hot pepper'],
+    'high acid / vinegar': ['vinegar', 'tamarind', 'sinigang mix', 'kamias'],
+    'high sodium': ['salt', 'soy sauce', 'fish sauce', 'monosodium glutamate', 'msg']
+  }
+
+  // 1. Critical Allergen Intersection
+  const matchedCritical = []
+  userAllergens.forEach(userA => {
+    const norm = userA.toLowerCase().trim()
+    if (!norm) return
+
+    // Direct allergen name match
+    const matchDirect = dishAllergens.some(da => {
+      const daNorm = da.toLowerCase()
+      return daNorm === norm || daNorm.includes(norm) || norm.includes(daNorm)
+    })
+
+    // Deep ingredient cross-check
+    const keywords = allergenKeywords[norm] || [norm]
+    const matchIngredient = dishIngredients.some(di => {
+      const diNorm = di.toLowerCase()
+      return keywords.some(k => diNorm.includes(k))
+    })
+
+    if (matchDirect || matchIngredient) {
+      matchedCritical.push(userA)
+    }
+  })
+
+  // 2. Digestive Sensitivity Intersection
+  const matchedSensitivities = []
+  userSensitivities.forEach(userS => {
+    const norm = userS.toLowerCase().trim()
+    if (!norm) return
+
+    const matchDirect = dishSensitivities.some(ds => {
+      const dsNorm = ds.toLowerCase()
+      return dsNorm === norm || dsNorm.includes(norm) || norm.includes(dsNorm)
+    })
+
+    const keywords = sensitivityKeywords[norm] || [norm]
+    const matchIngredient = dishIngredients.some(di => {
+      const diNorm = di.toLowerCase()
+      return keywords.some(k => diNorm.includes(k))
+    })
+
+    if (matchDirect || matchIngredient) {
+      matchedSensitivities.push(userS)
+    }
+  })
+
+  // 3. Dietary Boundary Exclusions
+  if (userDietary.some(d => d.toLowerCase().includes('pork')) && (dishDietary.includes('Pork') || dishIngredients.some(i => i.toLowerCase().includes('pork')))) {
+    matchedCritical.push('Pork')
+  }
+  if (userDietary.some(d => d.toLowerCase().includes('beef')) && (dishDietary.includes('Beef') || dishIngredients.some(i => i.toLowerCase().includes('beef')))) {
+    matchedCritical.push('Beef')
+  }
+  if (userDietary.some(d => d.toLowerCase().includes('vegetarian')) && !dishDietary.includes('Vegetarian') && !dishDietary.includes('Vegetarian / Plant-Based')) {
+    matchedCritical.push('Non-Vegetarian')
+  }
+
+  // 4. Custom Watchlist
+  const matchedWatchlist = []
+  userWatchlist.forEach(term => {
+    const lower = term.toLowerCase().trim()
+    if (!lower) return
+    const inIngredients = dishIngredients.some(i => i.toLowerCase().includes(lower))
+    const inName = (dish.name && dish.name.toLowerCase().includes(lower))
+    if (inIngredients || inName) {
+      matchedWatchlist.push(`Watchlist: [${term}]`)
+    }
+  })
+
+  const uniqueCritical = Array.from(new Set(matchedCritical))
+  const uniqueSensitivities = Array.from(new Set(matchedSensitivities))
+  const uniqueWatchlist = Array.from(new Set(matchedWatchlist))
+  const allList = [...uniqueCritical, ...uniqueSensitivities, ...uniqueWatchlist]
+
+  return {
+    hasConflict: allList.length > 0,
+    hasCriticalAllergen: uniqueCritical.length > 0,
+    hasSensitivity: uniqueSensitivities.length > 0,
+    criticalAllergens: uniqueCritical,
+    sensitivities: uniqueSensitivities,
+    watchlist: uniqueWatchlist,
+    all: allList
+  }
+}
+
+function getMatches(item) {
+  return getDietaryConflicts(item).all
 }
 
 const openItemModal = (item) => {
   selectedItem.value = item
   preference.value = 'no_preference'
   quantity.value = 1
+  dishRiskOverride.value = false // Reset risk override on new item selection
 }
+
+const canAddSelectedItem = computed(() => {
+  if (!selectedItem.value || selectedItem.value.stock <= 0) return false
+  const conflicts = getDietaryConflicts(selectedItem.value)
+  if (conflicts.hasCriticalAllergen && !dishRiskOverride.value) {
+    return false // Block checkout action until student overrides
+  }
+  return true
+})
 
 const addToCart = () => {
   if (!selectedItem.value || selectedItem.value.stock <= 0) return
 
-  const conflicts = getMatches(selectedItem.value)
-  if (conflicts.length > 0) {
-    activeDishConflicts.value = conflicts
+  const conflicts = getDietaryConflicts(selectedItem.value)
+  // Hard restriction: Block if critical allergen is present without explicit override
+  if (conflicts.hasCriticalAllergen && !dishRiskOverride.value) {
+    return
+  }
+
+  // If digestive sensitivity only and modal wanted
+  if (conflicts.hasSensitivity && !conflicts.hasCriticalAllergen) {
+    activeDishConflicts.value = conflicts.sensitivities
     conflictModalOpen.value = true
     return
   }
@@ -909,40 +1126,21 @@ const removeFromCart = (index) => {
 }
 
 const userDangerMatches = computed(() => {
-  let userFlags = [];
-  if (isAdmin.value && activePreviewMode.value === 'customer') {
-    const rawFlags = simulatedDietaryFlags.value;
-    userFlags = [...(rawFlags.allergens || []), ...(rawFlags.dietary || [])];
-  } else {
-    const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}');
-    const rawFlags = user.dietary_flags || [];
-    userFlags = Array.isArray(rawFlags) ? rawFlags : [...(rawFlags.allergens || []), ...(rawFlags.dietary || [])];
-  }
-  const set = new Set();
+  const set = new Set()
   cart.value.forEach(c => {
-    (c.item.allergens || []).forEach(a => { if (userFlags.includes(a)) set.add(a); });
-    if (userFlags.includes('No Pork') && (c.item.dietary || []).includes('Pork')) set.add('Pork');
-    if (userFlags.includes('No Beef') && (c.item.dietary || []).includes('Beef')) set.add('Beef');
-    if (userFlags.includes('Vegetarian / Plant-Based') && !(c.item.dietary || []).includes('Vegetarian / Plant-Based')) set.add('Non-Vegetarian');
-  });
-  return Array.from(set);
+    const conflicts = getDietaryConflicts(c.item)
+    conflicts.criticalAllergens.forEach(a => set.add(a))
+  })
+  return Array.from(set)
 })
 
 const userCautionMatches = computed(() => {
-  let userFlags = [];
-  if (isAdmin.value && activePreviewMode.value === 'customer') {
-    const rawFlags = simulatedDietaryFlags.value;
-    userFlags = [...(rawFlags.sensitivities || [])];
-  } else {
-    const user = JSON.parse(localStorage.getItem('optimeal_user') || '{}');
-    const rawFlags = user.dietary_flags || [];
-    userFlags = Array.isArray(rawFlags) ? rawFlags : [...(rawFlags.sensitivities || [])];
-  }
-  const set = new Set();
+  const set = new Set()
   cart.value.forEach(c => {
-    (c.item.sensitivities || []).forEach(s => { if (userFlags.includes(s)) set.add(s); });
-  });
-  return Array.from(set);
+    const conflicts = getDietaryConflicts(c.item)
+    conflicts.sensitivities.forEach(s => set.add(s))
+  })
+  return Array.from(set)
 })
 
 const initiateCheckout = () => {
