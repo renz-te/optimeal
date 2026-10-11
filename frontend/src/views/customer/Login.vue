@@ -34,18 +34,31 @@
           
           <div>
             <label class="block text-sm font-bold text-slate-700 mb-1">Email / Campus ID</label>
-            <input v-model="form.email" type="email" class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all" placeholder="juan@university.edu" required>
+            <input id="login-email" v-model="form.email" type="email" class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all" placeholder="juan@university.edu" required>
           </div>
 
           <div>
             <label class="block text-sm font-bold text-slate-700 mb-1">Password</label>
-            <input v-model="form.password" type="password" class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all" placeholder="••••••••" required>
+            <input id="login-password" v-model="form.password" type="password" class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all" placeholder="••••••••" required>
           </div>
 
-          <button type="submit" class="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-lg hover:bg-emerald-700 shadow-sm transition-all active:scale-95 flex justify-center items-center mt-6" :disabled="loading">
+          <button id="login-submit" type="submit" class="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-lg hover:bg-emerald-700 shadow-sm transition-all active:scale-95 flex justify-center items-center mt-6" :disabled="loading">
             <span v-if="loading" class="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full mr-2"></span>
             {{ isLogin ? 'Sign In' : 'Create Account' }}
           </button>
+
+          <!-- Quick Fill for Admin -->
+          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span>Quick Fill:</span>
+            <button
+              type="button"
+              id="quick-admin-login"
+              @click="form.email = 'admin@optimeal.test'; form.password = 'password123'"
+              class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-semibold"
+            >
+              Admin (admin@optimeal.test)
+            </button>
+          </div>
         </form>
 
       </div>

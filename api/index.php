@@ -130,6 +130,14 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleCreateUser($pdo);
+} elseif ($route === '/admin/taxonomy' && $method === 'GET') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleGetTaxonomy($pdo);
+} elseif ($route === '/admin/ingredient' && $method === 'POST') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleUpdateIngredient($pdo);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }
