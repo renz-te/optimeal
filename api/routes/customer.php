@@ -54,6 +54,7 @@ function expireUnclaimedOrdersAfterClosing($pdo) {
 }
 
 function handleGetMenu($pdo) {
+    date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
 
     // Closing behavior: after closing_time, menu endpoint returns no purchasable items
@@ -77,7 +78,8 @@ function handleGetMenu($pdo) {
     $stmt = $pdo->prepare("
         SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url,
                m.category, m.dietary, m.ai_confirmed, m.calories, m.protein_g, m.carbs_g, m.fat_g, m.sodium_mg,
-               i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app
+               i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
+               i.cooked_at, i.sell_by
         FROM menu_items m
         LEFT JOIN inventory i ON m.id = i.menu_item_id
         WHERE m.store_id = ? AND m.is_active = 1 AND i.delisted_from_app = 0
@@ -85,8 +87,17 @@ function handleGetMenu($pdo) {
     $stmt->execute([$store_id]);
     $items = $stmt->fetchAll();
 
+    $now = time();
     $result = [];
     foreach ($items as $item) {
+        // Food Safety Check: If current time in Asia/Manila >= sell_by, item is spoiled
+        if (!empty($item['sell_by'])) {
+            $sellByTimestamp = strtotime($item['sell_by']);
+            if ($now >= $sellByTimestamp) {
+                // Item has expired its safe holding threshold: omit from menu
+                continue;
+            }
+        }
         // 1. Unified dynamic pricing resolution using global settings tiers
         $current_price = PricingEngine::calculateCurrentPrice(
             $item['base_price'],
@@ -154,6 +165,8 @@ function handleGetMenu($pdo) {
             'base_price' => $item['base_price'],
             'stock' => $item['online_pool_qty'], // For frontend UI
             'online_pool_qty' => $item['online_pool_qty'], // Backwards compatibility
+            'cooked_at' => $item['cooked_at'] ?? null,
+            'sell_by' => $item['sell_by'] ?? null,
             'ingredients' => $ingredients,
             'allergens' => $critical_allergens,
             'critical_allergens' => $critical_allergens,
@@ -319,13 +332,29 @@ function handleCreateReservation($pdo) {
             $item_id = $item['menu_item_id'];
             $qty = (int)$item['quantity'];
 
-            // Validate inventory & calculate price using unified PricingEngine
-            $stmt = $pdo->prepare("SELECT m.base_price, m.price_floor, i.online_pool_qty FROM menu_items m JOIN inventory i ON m.id = i.menu_item_id WHERE m.id = ?");
+            // Validate inventory, food safety & calculate price using unified PricingEngine
+            $stmt = $pdo->prepare("
+                SELECT m.name, m.base_price, m.price_floor, i.online_pool_qty, i.sell_by 
+                FROM menu_items m 
+                JOIN inventory i ON m.id = i.menu_item_id 
+                WHERE m.id = ?
+            ");
             $stmt->execute([$item_id]);
             $itemData = $stmt->fetch();
             
             if (!$itemData || $itemData['online_pool_qty'] < $qty) {
                 throw new Exception("Not enough inventory for item $item_id");
+            }
+
+            // Food Safety Enforcement: Check sell_by in Asia/Manila
+            if (!empty($itemData['sell_by'])) {
+                date_default_timezone_set('Asia/Manila');
+                $now = time();
+                $sellByTimestamp = strtotime($itemData['sell_by']);
+                if ($now >= $sellByTimestamp) {
+                    $dishName = $itemData['name'] ?? "ID $item_id";
+                    throw new Exception("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.");
+                }
             }
 
             $current_price = PricingEngine::calculateCurrentPrice(

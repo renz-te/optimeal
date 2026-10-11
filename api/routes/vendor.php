@@ -484,6 +484,17 @@ function handleLaunchMenu($pdo) {
         jsonResponse(['error' => 'Missing or invalid items array'], 400);
     }
 
+    date_default_timezone_set('Asia/Manila');
+
+    // Parse batch-level defaults
+    $batchCookedAt = !empty($input['cooked_at']) 
+        ? date('Y-m-d H:i:s', strtotime($input['cooked_at'])) 
+        : date('Y-m-d H:i:s');
+        
+    $batchSellBy = !empty($input['sell_by']) 
+        ? date('Y-m-d H:i:s', strtotime($input['sell_by'])) 
+        : date('Y-m-d H:i:s', strtotime('+4 hours', strtotime($batchCookedAt)));
+
     try {
         $pdo->beginTransaction();
 
@@ -492,18 +503,33 @@ function handleLaunchMenu($pdo) {
         $stmtReset->execute([$store_id]);
 
         $stmtActivate = $pdo->prepare("UPDATE menu_items SET is_active = 1 WHERE id = ? AND store_id = ?");
-        $stmtUpdateStock = $pdo->prepare("UPDATE inventory SET online_pool_qty = ?, delisted_from_app = 0 WHERE menu_item_id = ?");
+        $stmtUpdateStock = $pdo->prepare("
+            UPDATE inventory 
+            SET online_pool_qty = ?, 
+                delisted_from_app = 0,
+                cooked_at = ?,
+                sell_by = ?
+            WHERE menu_item_id = ?
+        ");
 
         foreach ($input['items'] as $item) {
             if (!isset($item['menu_item_id'], $item['stock'])) {
                 continue;
             }
             
+            $itemCookedAt = !empty($item['cooked_at']) 
+                ? date('Y-m-d H:i:s', strtotime($item['cooked_at'])) 
+                : $batchCookedAt;
+                
+            $itemSellBy = !empty($item['sell_by']) 
+                ? date('Y-m-d H:i:s', strtotime($item['sell_by'])) 
+                : $batchSellBy;
+
             $stmtActivate->execute([$item['menu_item_id'], $store_id]);
             
             if ($stmtActivate->rowCount() > 0) {
                 // Ensure inventory updates only if the item genuinely belongs to the store
-                $stmtUpdateStock->execute([$item['stock'], $item['menu_item_id']]);
+                $stmtUpdateStock->execute([$item['stock'], $itemCookedAt, $itemSellBy, $item['menu_item_id']]);
             }
         }
 
@@ -523,6 +549,7 @@ function handleGetVendorMenu($pdo) {
                m.base_price, m.price_floor, m.image_url, m.calories, m.protein_g, 
                m.carbs_g, m.fat_g, m.sodium_mg, m.ai_confirmed, m.is_active,
                i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
+               i.cooked_at, i.sell_by,
                pr.rush_hour_end_time, pr.decay_start_offset_minutes, pr.decay_rate_percent, 
                pr.decay_interval_minutes, pr.min_stock_to_trigger_decay
         FROM menu_items m

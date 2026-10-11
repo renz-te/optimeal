@@ -60,10 +60,37 @@
     </div>
 
     <!-- Action Bar -->
-    <div class="fixed bottom-0 left-0 md:left-64 right-0 p-4 bg-white/80 backdrop-blur border-t border-slate-200 z-30 flex justify-between items-center shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
-      <div class="text-sm font-bold text-slate-600">
-        <span class="text-emerald-600 text-lg mr-1">{{ activeRoster.filter(r => r.selected).length }}</span> dishes selected for lineup
+    <div class="fixed bottom-0 left-0 md:left-64 right-0 p-4 bg-white/95 backdrop-blur border-t border-slate-200 z-30 flex flex-wrap gap-4 justify-between items-center shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
+      <div class="flex flex-wrap items-center gap-4">
+        <div class="text-sm font-bold text-slate-600">
+          <span class="text-emerald-600 text-lg mr-1">{{ activeRoster.filter(r => r.selected).length }}</span> dishes selected
+        </div>
+
+        <!-- Food Safety Freshness Batch Controls -->
+        <div class="flex items-center gap-3 bg-amber-50/80 border border-amber-200 rounded-xl px-3.5 py-1.5 text-xs shadow-sm">
+          <span class="font-bold text-amber-900 flex items-center gap-1">
+            <span>🛡️</span> Food Safety:
+          </span>
+          <div class="flex items-center gap-1.5">
+            <label class="text-[11px] font-semibold text-slate-500">Cooked:</label>
+            <input 
+              type="datetime-local" 
+              v-model="batchCookedAt" 
+              @change="onCookedAtChange"
+              class="px-2 py-1 bg-white border border-slate-300 rounded font-medium text-slate-800 text-xs outline-none focus:border-emerald-500"
+            />
+          </div>
+          <div class="flex items-center gap-1.5">
+            <label class="text-[11px] font-semibold text-slate-500">Sell-By (+4h):</label>
+            <input 
+              type="datetime-local" 
+              v-model="batchSellBy" 
+              class="px-2 py-1 bg-white border border-slate-300 rounded font-medium text-slate-800 text-xs outline-none focus:border-emerald-500"
+            />
+          </div>
+        </div>
       </div>
+
       <button @click="launchMenu" :disabled="!activeRoster.some(r => r.selected) || launchState === 'success'" class="px-8 py-3 rounded-xl font-black text-lg shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               :class="launchState === 'success' ? 'bg-slate-700 text-white cursor-default' : 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-xl active:scale-95'">
         {{ launchState === 'success' ? 'Lineup Active ✓' : 'Launch Live Menu 🚀' }}
@@ -268,6 +295,27 @@ const showCustomModal = ref(false)
 const editItem = ref(null)
 const newCustomAllergen = ref('')
 const launchState = ref('idle')
+
+const formatDateTimeLocal = (date) => {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const now = new Date()
+const in4Hours = new Date(now.getTime() + 4 * 60 * 60 * 1000)
+
+const batchCookedAt = ref(formatDateTimeLocal(now))
+const batchSellBy = ref(formatDateTimeLocal(in4Hours))
+
+const onCookedAtChange = () => {
+  if (batchCookedAt.value) {
+    const d = new Date(batchCookedAt.value)
+    if (!isNaN(d.getTime())) {
+      const d4 = new Date(d.getTime() + 4 * 60 * 60 * 1000)
+      batchSellBy.value = formatDateTimeLocal(d4)
+    }
+  }
+}
 
 const toast = ref({ show: false, message: '', type: 'success' })
 const showToast = (message, type = 'success') => {
@@ -568,9 +616,13 @@ const launchMenu = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         store_id: 1,
+        cooked_at: batchCookedAt.value,
+        sell_by: batchSellBy.value,
         items: selectedItems.map(item => ({
           menu_item_id: item.id,
-          stock: item.stock
+          stock: item.stock,
+          cooked_at: item.cooked_at || batchCookedAt.value,
+          sell_by: item.sell_by || batchSellBy.value
         }))
       })
     })

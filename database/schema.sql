@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS inventory (
     online_pool_qty INT NOT NULL DEFAULT 0,
     critical_stock_threshold INT NOT NULL DEFAULT 2,
     delisted_from_app BOOLEAN DEFAULT FALSE,
+    cooked_at DATETIME NULL,
+    sell_by DATETIME NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
 );
