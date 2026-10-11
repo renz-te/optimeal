@@ -204,6 +204,93 @@ function handleCreateReservation($pdo) {
         jsonResponse(['error' => 'No active cafeteria store found.'], 500);
     }
 
+    // Server-Side Dietary Enforcement: Check for critical allergen conflicts against student profile
+    $stmtProfile = $pdo->prepare("SELECT allergens FROM student_profiles WHERE user_id = ?");
+    $stmtProfile->execute([$user_id]);
+    $profileRow = $stmtProfile->fetch(PDO::FETCH_ASSOC);
+    $userAllergens = $profileRow ? (json_decode($profileRow['allergens'] ?? '[]', true) ?: []) : [];
+
+    if (!empty($userAllergens) && count($input['items']) > 0) {
+        $itemIds = array_values(array_filter(array_map(function($i) {
+            return isset($i['menu_item_id']) ? (int)$i['menu_item_id'] : 0;
+        }, $input['items'])));
+
+        if (count($itemIds) > 0) {
+            $placeholders = str_repeat('?,', count($itemIds) - 1) . '?';
+            
+            // 1. Fetch mapped critical allergens for ordered dishes
+            $stmtAllergens = $pdo->prepare("
+                SELECT DISTINCT ca.name 
+                FROM menu_item_critical_allergens mica
+                JOIN critical_allergens ca ON mica.allergen_id = ca.id
+                WHERE mica.menu_item_id IN ($placeholders)
+            ");
+            $stmtAllergens->execute($itemIds);
+            $dishAllergens = $stmtAllergens->fetchAll(PDO::FETCH_COLUMN);
+
+            // 2. Fetch ingredients for ordered dishes for keyword cross-referencing
+            $stmtIngredients = $pdo->prepare("
+                SELECT DISTINCT i.name 
+                FROM menu_item_ingredients mii
+                JOIN ingredients i ON mii.ingredient_id = i.id
+                WHERE mii.menu_item_id IN ($placeholders)
+            ");
+            $stmtIngredients->execute($itemIds);
+            $dishIngredients = $stmtIngredients->fetchAll(PDO::FETCH_COLUMN);
+
+            $allergenKeywords = [
+                'dairy' => ['dairy', 'milk', 'cheese', 'butter', 'cream', 'condensed milk', 'evaporated milk', 'curd', 'whey', 'yogurt'],
+                'peanuts' => ['peanut', 'peanuts', 'peanut butter'],
+                'eggs' => ['egg', 'eggs', 'egg noodles', 'mayo', 'mayonnaise'],
+                'fish' => ['fish', 'fish sauce', 'bangus', 'tilapia', 'tuna', 'salmon'],
+                'soy' => ['soy', 'soy sauce', 'tofu', 'edamame', 'miso'],
+                'shellfish / crustaceans' => ['shellfish', 'crustaceans', 'shrimp', 'crab', 'squid', 'clams', 'prawn', 'lobster', 'oyster'],
+                'shrimp paste (bagoong)' => ['shrimp paste', 'bagoong', 'alamang'],
+                'wheat/gluten' => ['wheat', 'gluten', 'flour', 'bread', 'pasta', 'noodles', 'bun', 'buns'],
+                'sesame' => ['sesame', 'sesame oil', 'sesame seeds']
+            ];
+
+            $conflictingAllergens = [];
+            foreach ($userAllergens as $ua) {
+                $uaLower = strtolower(trim($ua));
+                if (!$uaLower) continue;
+
+                // Direct check against mapped allergens
+                foreach ($dishAllergens as $da) {
+                    $daLower = strtolower(trim($da));
+                    if ($daLower === $uaLower || str_contains($daLower, $uaLower) || str_contains($uaLower, $daLower)) {
+                        $conflictingAllergens[] = $ua;
+                        break;
+                    }
+                }
+
+                // Ingredient keyword check
+                $keywords = $allergenKeywords[$uaLower] ?? [$uaLower];
+                foreach ($dishIngredients as $di) {
+                    $diLower = strtolower(trim($di));
+                    foreach ($keywords as $kw) {
+                        if (str_contains($diLower, $kw)) {
+                            $conflictingAllergens[] = $ua;
+                            break 2;
+                        }
+                    }
+                }
+            }
+
+            $conflictingAllergens = array_values(array_unique($conflictingAllergens));
+
+            if (!empty($conflictingAllergens)) {
+                $hasOverride = !empty($input['allergen_override']) && $input['allergen_override'] === true;
+                if (!$hasOverride) {
+                    $conflictList = implode(', ', $conflictingAllergens);
+                    jsonResponse([
+                        'error' => "Safety Restriction: Cart contains $conflictList. You must acknowledge the risk to proceed."
+                    ], 400);
+                }
+            }
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         $total_amount = 0;

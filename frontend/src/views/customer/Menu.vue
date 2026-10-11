@@ -1183,6 +1183,7 @@ const processOrder = async (type) => {
       const payload = {
         type: type,
         fulfillment_type: orderType.value,
+        allergen_override: Boolean(dangerAcknowledged.value),
         items: cart.value.map(c => ({
           menu_item_id: c.item.id,
           quantity: c.quantity,
