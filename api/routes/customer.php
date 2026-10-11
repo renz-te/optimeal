@@ -82,7 +82,7 @@ function handleGetMenu($pdo) {
                i.cooked_at, i.sell_by
         FROM menu_items m
         LEFT JOIN inventory i ON m.id = i.menu_item_id
-        WHERE m.store_id = ? AND m.is_active = 1 AND i.delisted_from_app = 0
+        WHERE m.store_id = ? AND m.is_active = 1 AND i.delisted_from_app = 0 AND i.online_pool_qty > 0
     ");
     $stmt->execute([$store_id]);
     $items = $stmt->fetchAll();
@@ -90,6 +90,11 @@ function handleGetMenu($pdo) {
     $now = time();
     $result = [];
     foreach ($items as $item) {
+        // Explicitly filter out any dishes where online_pool_qty <= 0
+        if ((int)($item['online_pool_qty'] ?? 0) <= 0) {
+            continue;
+        }
+
         // Food Safety Check: If current time in Asia/Manila >= sell_by, item is spoiled
         if (!empty($item['sell_by'])) {
             $sellByTimestamp = strtotime($item['sell_by']);
@@ -311,6 +316,43 @@ function handleCreateReservation($pdo) {
         }
     }
 
+    // Pre-flight Checkout Defense: explicitly verify that online_pool_qty >= quantity for every item in the cart BEFORE creating the order
+    $cartTotals = [];
+    foreach ($input['items'] as $item) {
+        $itemId = (int)($item['menu_item_id'] ?? 0);
+        $qty = (int)($item['quantity'] ?? 0);
+        if ($itemId <= 0 || $qty <= 0) {
+            jsonResponse(['error' => 'Invalid item or quantity in reservation request.'], 400);
+        }
+        $cartTotals[$itemId] = ($cartTotals[$itemId] ?? 0) + $qty;
+    }
+
+    foreach ($cartTotals as $itemId => $requiredQty) {
+        $stmtStock = $pdo->prepare("
+            SELECT m.name, COALESCE(i.online_pool_qty, 0) AS online_pool_qty, i.sell_by
+            FROM menu_items m
+            LEFT JOIN inventory i ON m.id = i.menu_item_id
+            WHERE m.id = ?
+        ");
+        $stmtStock->execute([$itemId]);
+        $stockRow = $stmtStock->fetch(PDO::FETCH_ASSOC);
+
+        $dishName = $stockRow ? $stockRow['name'] : "Dish #$itemId";
+        $availableQty = $stockRow ? max(0, (int)$stockRow['online_pool_qty']) : 0;
+
+        if (!$stockRow || $availableQty < $requiredQty) {
+            jsonResponse(['error' => "Out of stock: Only {$availableQty} portions of {$dishName} remaining."], 400);
+        }
+
+        // Food Safety Check: Sell-By timestamp
+        if (!empty($stockRow['sell_by'])) {
+            date_default_timezone_set('Asia/Manila');
+            if (time() >= strtotime($stockRow['sell_by'])) {
+                jsonResponse(['error' => "Food safety violation: Item '{$dishName}' has passed its safe sell-by expiration time ({$stockRow['sell_by']}) and cannot be ordered."], 400);
+            }
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         $total_amount = 0;
@@ -341,16 +383,20 @@ function handleCreateReservation($pdo) {
 
             // Validate inventory, food safety & calculate price using unified PricingEngine
             $stmt = $pdo->prepare("
-                SELECT m.name, m.base_price, m.price_floor, i.online_pool_qty, i.sell_by 
+                SELECT m.name, m.base_price, m.price_floor, COALESCE(i.online_pool_qty, 0) AS online_pool_qty, i.sell_by 
                 FROM menu_items m 
-                JOIN inventory i ON m.id = i.menu_item_id 
+                LEFT JOIN inventory i ON m.id = i.menu_item_id 
                 WHERE m.id = ?
+                FOR UPDATE
             ");
             $stmt->execute([$item_id]);
             $itemData = $stmt->fetch();
             
-            if (!$itemData || $itemData['online_pool_qty'] < $qty) {
-                throw new Exception("Not enough inventory for item $item_id");
+            $dishName = $itemData ? $itemData['name'] : "Item $item_id";
+            $availableQty = $itemData ? max(0, (int)$itemData['online_pool_qty']) : 0;
+
+            if (!$itemData || $availableQty < $qty) {
+                throw new Exception("Out of stock: Only {$availableQty} portions of {$dishName} remaining.");
             }
 
             // Food Safety Enforcement: Check sell_by in Asia/Manila
@@ -359,7 +405,6 @@ function handleCreateReservation($pdo) {
                 $now = time();
                 $sellByTimestamp = strtotime($itemData['sell_by']);
                 if ($now >= $sellByTimestamp) {
-                    $dishName = $itemData['name'] ?? "ID $item_id";
                     throw new Exception("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.");
                 }
             }
@@ -400,7 +445,7 @@ function handleCreateReservation($pdo) {
 
             $updateInventory->execute([$qty, $qty, $item_id, $qty]);
             if ($updateInventory->rowCount() === 0) {
-                throw new Exception("Failed to update inventory for item $item_id (possibly out of stock)");
+                throw new Exception("Out of stock: Only 0 portions of {$dishName} remaining.");
             }
         }
 

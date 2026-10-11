@@ -1105,7 +1105,7 @@ const launchMenu = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        store_id: 1,
+        store_id: masterCatalog.value[0]?.store_id || 1,
         cooked_at: batchCookedAt.value,
         sell_by: batchSellBy.value,
         items: selectedItems.map(item => ({

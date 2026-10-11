@@ -487,12 +487,12 @@ function handleSaveDish($pdo) {
 
 function handleLaunchMenu($pdo) {
     $session = requireRole($pdo, ['vendor', 'admin']);
+    $vendorStoreId = requireVendor($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
 
-    if (empty($input['store_id'])) {
-        jsonResponse(['error' => 'Missing store_id'], 400);
-    }
-    $store_id = $input['store_id'];
+    $store_id = ($_SESSION['role'] === 'admin' && !empty($input['store_id'])) 
+        ? (int)$input['store_id'] 
+        : $vendorStoreId;
 
     if (!isset($input['items']) || !is_array($input['items'])) {
         jsonResponse(['error' => 'Missing or invalid items array'], 400);
@@ -512,18 +512,29 @@ function handleLaunchMenu($pdo) {
     try {
         $pdo->beginTransaction();
 
-        // Reset all dishes for this store to inactive
+        // 1. Reset all dishes for this store: clear online_pool_qty and delist from app (clears un-launched dishes/yesterday's leftovers)
+        $stmtResetInventory = $pdo->prepare("
+            UPDATE inventory i
+            JOIN menu_items m ON i.menu_item_id = m.id
+            SET i.online_pool_qty = 0, i.delisted_from_app = 1
+            WHERE m.store_id = ?
+        ");
+        $stmtResetInventory->execute([$store_id]);
+
+        // 2. Reset all dishes for this store to inactive
         $stmtReset = $pdo->prepare("UPDATE menu_items SET is_active = 0 WHERE store_id = ?");
         $stmtReset->execute([$store_id]);
 
+        $stmtCheckOwner = $pdo->prepare("SELECT 1 FROM menu_items WHERE id = ? AND store_id = ?");
         $stmtActivate = $pdo->prepare("UPDATE menu_items SET is_active = 1 WHERE id = ? AND store_id = ?");
         $stmtUpdateStock = $pdo->prepare("
-            UPDATE inventory 
-            SET online_pool_qty = ?, 
+            INSERT INTO inventory (menu_item_id, online_pool_qty, walkin_pool_qty, critical_stock_threshold, delisted_from_app, cooked_at, sell_by)
+            VALUES (?, ?, 0, 2, 0, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                online_pool_qty = VALUES(online_pool_qty),
                 delisted_from_app = 0,
-                cooked_at = ?,
-                sell_by = ?
-            WHERE menu_item_id = ?
+                cooked_at = VALUES(cooked_at),
+                sell_by = VALUES(sell_by)
         ");
 
         foreach ($input['items'] as $item) {
@@ -531,6 +542,16 @@ function handleLaunchMenu($pdo) {
                 continue;
             }
             
+            $itemId = (int)$item['menu_item_id'];
+            $stock = max(0, (int)$item['stock']);
+
+            $stmtCheckOwner->execute([$itemId, $store_id]);
+            if (!$stmtCheckOwner->fetchColumn()) {
+                continue; // Dish does not belong to this store
+            }
+
+            $stmtActivate->execute([$itemId, $store_id]);
+
             $itemCookedAt = !empty($item['cooked_at']) 
                 ? date('Y-m-d H:i:s', strtotime($item['cooked_at'])) 
                 : $batchCookedAt;
@@ -539,12 +560,7 @@ function handleLaunchMenu($pdo) {
                 ? date('Y-m-d H:i:s', strtotime($item['sell_by'])) 
                 : $batchSellBy;
 
-            $stmtActivate->execute([$item['menu_item_id'], $store_id]);
-            
-            if ($stmtActivate->rowCount() > 0) {
-                // Ensure inventory updates only if the item genuinely belongs to the store
-                $stmtUpdateStock->execute([$item['stock'], $itemCookedAt, $itemSellBy, $item['menu_item_id']]);
-            }
+            $stmtUpdateStock->execute([$itemId, $stock, $itemCookedAt, $itemSellBy]);
         }
 
         $pdo->commit();
