@@ -19,6 +19,7 @@ const routes = [
     children: [
       { path: '', redirect: '/customer/menu' },
       { path: 'menu', component: CustomerMenu },
+      { path: 'orders', component: () => import('../views/customer/OrderHistory.vue') },
       { path: 'settings', component: CustomerSettings }
     ]
   },

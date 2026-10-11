@@ -89,6 +89,10 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/reservations/update-fulfillment' && $method === 'POST') {
     require 'routes/customer.php';
     handleUpdateFulfillment($pdo);
+} elseif ($route === '/customer/orders' && $method === 'GET') {
+    requireStudent($pdo);
+    require 'routes/customer.php';
+    handleGetMyOrders($pdo);
 } elseif ($route === '/orders' && $method === 'GET') {
     require 'routes/customer.php';
     handleGetCustomerOrders($pdo);

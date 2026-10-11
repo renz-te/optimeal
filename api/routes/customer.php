@@ -285,6 +285,49 @@ function handleGetCustomerOrders($pdo) {
     jsonResponse($stmt->fetchAll());
 }
 
+function handleGetMyOrders($pdo) {
+    $user_id = requireCustomer($pdo);
+
+    $stmt = $pdo->prepare("
+        SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type
+        FROM orders
+        WHERE user_id = ?
+        ORDER BY reserved_at DESC
+    ");
+    $stmt->execute([$user_id]);
+    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $orderIds = array_column($orders, 'id');
+    if (!empty($orderIds)) {
+        $inQuery = implode(',', array_fill(0, count($orderIds), '?'));
+        $itemStmt = $pdo->prepare("
+            SELECT oi.id, oi.order_id, oi.menu_item_id, oi.quantity, oi.unit_price_at_order, oi.portion_preference,
+                   COALESCE(m.name, 'Item') AS item_name, m.image_url
+            FROM order_items oi
+            LEFT JOIN menu_items m ON oi.menu_item_id = m.id
+            WHERE oi.order_id IN ($inQuery)
+            ORDER BY oi.id ASC
+        ");
+        $itemStmt->execute($orderIds);
+        $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $itemsByOrder = [];
+        foreach ($items as $item) {
+            $itemsByOrder[$item['order_id']][] = $item;
+        }
+
+        foreach ($orders as &$order) {
+            $order['items'] = $itemsByOrder[$order['id']] ?? [];
+        }
+    } else {
+        foreach ($orders as &$order) {
+            $order['items'] = [];
+        }
+    }
+
+    jsonResponse($orders);
+}
+
 function handleUpdateFulfillment($pdo) {
     $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);

@@ -2,13 +2,18 @@
   <div class="min-h-screen bg-slate-50 font-sans antialiased text-slate-900">
     <nav class="bg-white/80 backdrop-blur border-b border-slate-200 sticky top-0 z-50 p-4 flex justify-between items-center mb-6">
       <h1 class="text-xl font-bold text-emerald-600 tracking-tight">OptiMeal</h1>
-      <div class="flex items-center space-x-4">
-        <router-link to="/customer/menu" class="flex items-center space-x-1.5 hover:text-emerald-600 font-medium px-3 py-2 rounded transition-colors" active-class="bg-emerald-50 text-emerald-700">
+      <div class="flex items-center space-x-2 sm:space-x-4">
+        <router-link to="/customer/menu" class="flex items-center space-x-1.5 hover:text-emerald-600 font-medium px-3 py-2 rounded transition-colors text-sm sm:text-base" active-class="bg-emerald-50 text-emerald-700">
           <ShoppingBag :size="18" />
           <span>Browse Menu</span>
         </router-link>
+
+        <router-link to="/customer/orders" class="flex items-center space-x-1.5 hover:text-emerald-600 font-medium px-3 py-2 rounded transition-colors text-sm sm:text-base" active-class="bg-emerald-50 text-emerald-700">
+          <Clock :size="18" />
+          <span>My Orders</span>
+        </router-link>
         
-        <div class="border-l border-slate-200 h-6 mx-2"></div>
+        <div class="border-l border-slate-200 h-6 mx-1 sm:mx-2"></div>
         
         <template v-if="user">
           <div class="flex items-center space-x-3 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
@@ -34,7 +39,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, ShoppingBag } from 'lucide-vue-next'
+import { User, ShoppingBag, Clock } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
 
 const { exitSandbox, clearSandbox } = useSandbox()
