@@ -55,9 +55,9 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useAuthStore } from '../../stores/auth'
 
-const router = useRouter()
+const authStore = useAuthStore()
 const isLogin = ref(true)
 const loading = ref(false)
 const error = ref('')
@@ -69,53 +69,30 @@ const form = reactive({
   role: 'customer'
 })
 
-
 const handleSubmit = async () => {
   error.value = ''
   loading.value = true
-  
-  const endpoint = isLogin.value ? '/api/auth/login' : '/api/auth/register'
-  const payload = isLogin.value 
-    ? { email: form.email, password: form.password }
-    : { name: form.name, email: form.email, password: form.password, role: 'customer' }
 
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    
-    const data = await res.json()
-    
-    if (!res.ok) {
-      throw new Error(data.error || 'Authentication failed')
+    if (isLogin.value) {
+      await authStore.login(form.email, form.password)
+    } else {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name, email: form.email, password: form.password, role: 'customer' })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Registration failed')
+      }
+      await authStore.login(form.email, form.password)
     }
-
-    loginUser(data.name || form.name || 'Customer', data.role || 'customer')
-
   } catch (err) {
     console.error('API Error:', err)
     error.value = err.message
   } finally {
     loading.value = false
-  }
-}
-
-const loginUser = (name, role) => {
-  localStorage.setItem('optimeal_user', JSON.stringify({
-    name: name,
-    email: form.email,
-    role: role
-  }))
-  window.dispatchEvent(new Event('auth-change'))
-  
-  if (role === 'vendor') {
-    router.push('/vendor/dashboard')
-  } else if (role === 'admin') {
-    router.push('/admin/dashboard')
-  } else {
-    router.push('/customer/menu')
   }
 }
 </script>

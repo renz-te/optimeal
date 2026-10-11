@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import CustomerLayout from '../layouts/CustomerLayout.vue'
 import DashboardLayout from '../layouts/DashboardLayout.vue'
 
@@ -14,6 +15,7 @@ const routes = [
   {
     path: '/customer',
     component: CustomerLayout,
+    meta: { requiresAuth: true, role: 'customer' },
     children: [
       { path: '', redirect: '/customer/menu' },
       { path: 'menu', component: CustomerMenu },
@@ -23,6 +25,7 @@ const routes = [
   {
     path: '/vendor',
     component: DashboardLayout,
+    meta: { requiresAuth: true, role: 'vendor' },
     children: [
       { path: '', redirect: '/vendor/dashboard' },
       { path: 'dashboard', component: VendorDashboard },
@@ -36,6 +39,7 @@ const routes = [
   {
     path: '/admin',
     component: DashboardLayout,
+    meta: { requiresAuth: true, role: 'admin' },
     children: [
       { path: '', redirect: '/admin/users' },
       { path: 'users', component: () => import('../views/admin/Users.vue') },
@@ -50,4 +54,34 @@ const router = createRouter({
   routes
 })
 
+router.beforeEach(async (to, from, next) => {
+  const authStore = useAuthStore()
+
+  if (!authStore.isInitialized) {
+    await authStore.initSession()
+  }
+
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
+
+  if (requiresAuth) {
+    if (!authStore.user) {
+      return next('/')
+    }
+
+    const matchedRoleRecord = to.matched.find(record => record.meta.role)
+    const requiredRole = matchedRoleRecord ? matchedRoleRecord.meta.role : null
+
+    if (requiredRole) {
+      const userRole = authStore.role
+      const roleMatches = userRole === requiredRole || (requiredRole === 'customer' && userRole === 'student')
+      if (!roleMatches) {
+        return next('/')
+      }
+    }
+  }
+
+  next()
+})
+
 export default router
+
