@@ -178,3 +178,142 @@ function handleUpdateIngredient($pdo) {
     }
 }
 
+function handleGetPendingIngredients($pdo) {
+    try {
+        $stmt = $pdo->query("
+            SELECT id, raw_name, status, resolved_ingredient_id, created_at 
+            FROM ingredient_submissions 
+            WHERE status = 'pending' 
+            ORDER BY id ASC
+        ");
+        $queue = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        jsonResponse($queue);
+    } catch (Exception $e) {
+        jsonResponse(['error' => 'Failed to fetch pending submissions: ' . $e->getMessage()], 500);
+    }
+}
+
+function handleResolveSubmission($pdo) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!isset($input['submission_id'], $input['action'])) {
+        jsonResponse(['error' => 'Missing required fields: submission_id and action are required.'], 400);
+    }
+
+    $submissionId = (int)$input['submission_id'];
+    $action = trim($input['action']);
+
+    if (!in_array($action, ['approve_as_new', 'link_to_existing', 'reject'], true)) {
+        jsonResponse(['error' => 'Invalid action. Allowed: approve_as_new, link_to_existing, reject.'], 400);
+    }
+
+    // Verify submission exists and is pending
+    $stmt = $pdo->prepare("SELECT * FROM ingredient_submissions WHERE id = ?");
+    $stmt->execute([$submissionId]);
+    $submission = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$submission) {
+        jsonResponse(['error' => 'Submission not found.'], 404);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $resolvedIngredientId = null;
+
+        if ($action === 'approve_as_new') {
+            $name = isset($input['name']) && trim($input['name']) !== '' ? trim($input['name']) : trim($submission['raw_name']);
+            $allergenIds = isset($input['allergen_ids']) && is_array($input['allergen_ids']) ? $input['allergen_ids'] : [];
+
+            // Check if ingredient exists
+            $checkStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?)");
+            $checkStmt->execute([$name]);
+            $existingId = $checkStmt->fetchColumn();
+
+            if ($existingId) {
+                $resolvedIngredientId = (int)$existingId;
+                $updateStmt = $pdo->prepare("UPDATE ingredients SET name = ? WHERE id = ?");
+                $updateStmt->execute([$name, $resolvedIngredientId]);
+            } else {
+                $insertStmt = $pdo->prepare("INSERT INTO ingredients (name) VALUES (?)");
+                $insertStmt->execute([$name]);
+                $resolvedIngredientId = (int)$pdo->lastInsertId();
+            }
+
+            // Sync allergen mappings
+            $delStmt = $pdo->prepare("DELETE FROM ingredient_allergen_map WHERE ingredient_id = ?");
+            $delStmt->execute([$resolvedIngredientId]);
+
+            if (!empty($allergenIds)) {
+                $insertMapStmt = $pdo->prepare("INSERT IGNORE INTO ingredient_allergen_map (ingredient_id, allergen_id) VALUES (?, ?)");
+                foreach ($allergenIds as $allergenId) {
+                    $insertMapStmt->execute([$resolvedIngredientId, (int)$allergenId]);
+                }
+            }
+
+            $updSubStmt = $pdo->prepare("UPDATE ingredient_submissions SET status = 'approved', resolved_ingredient_id = ? WHERE id = ?");
+            $updSubStmt->execute([$resolvedIngredientId, $submissionId]);
+
+            $pdo->commit();
+
+            jsonResponse([
+                'message' => 'Submission approved as new ingredient',
+                'submission_id' => $submissionId,
+                'status' => 'approved',
+                'ingredient' => [
+                    'id' => $resolvedIngredientId,
+                    'name' => $name,
+                    'allergen_ids' => array_map('intval', $allergenIds)
+                ]
+            ]);
+
+        } elseif ($action === 'link_to_existing') {
+            if (!isset($input['existing_ingredient_id']) || (int)$input['existing_ingredient_id'] <= 0) {
+                $pdo->rollBack();
+                jsonResponse(['error' => 'existing_ingredient_id is required to link submission.'], 400);
+            }
+
+            $resolvedIngredientId = (int)$input['existing_ingredient_id'];
+            // Check that ingredient exists
+            $checkStmt = $pdo->prepare("SELECT id, name FROM ingredients WHERE id = ?");
+            $checkStmt->execute([$resolvedIngredientId]);
+            $ingredient = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$ingredient) {
+                $pdo->rollBack();
+                jsonResponse(['error' => 'Specified existing ingredient does not exist.'], 404);
+            }
+
+            $updSubStmt = $pdo->prepare("UPDATE ingredient_submissions SET status = 'approved', resolved_ingredient_id = ? WHERE id = ?");
+            $updSubStmt->execute([$resolvedIngredientId, $submissionId]);
+
+            $pdo->commit();
+
+            jsonResponse([
+                'message' => 'Submission linked to existing ingredient',
+                'submission_id' => $submissionId,
+                'status' => 'approved',
+                'ingredient' => $ingredient
+            ]);
+
+        } elseif ($action === 'reject') {
+            $updSubStmt = $pdo->prepare("UPDATE ingredient_submissions SET status = 'rejected' WHERE id = ?");
+            $updSubStmt->execute([$submissionId]);
+
+            $pdo->commit();
+
+            jsonResponse([
+                'message' => 'Submission rejected',
+                'submission_id' => $submissionId,
+                'status' => 'rejected'
+            ]);
+        }
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        jsonResponse(['error' => 'Database error: ' . $e->getMessage()], 500);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        jsonResponse(['error' => $e->getMessage()], 500);
+    }
+}
+
+
