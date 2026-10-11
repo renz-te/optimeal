@@ -139,6 +139,15 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/dish/recipe' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSaveRecipe($pdo);
+} elseif ($route === '/vendor/dish/price-floor' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleApplyPriceFloor($pdo);
+} elseif ($route === '/vendor/ingredient-costs' && $method === 'GET') {
+    require 'routes/vendor.php';
+    handleGetIngredientCosts($pdo);
+} elseif ($route === '/vendor/ingredient-costs' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleSaveIngredientCosts($pdo);
 } elseif ($route === '/vendor/dish/recipe/suggest' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSuggestRecipe($pdo);

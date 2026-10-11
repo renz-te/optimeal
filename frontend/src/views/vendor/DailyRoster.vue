@@ -307,23 +307,23 @@
     </transition>
 
     <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
-      <div v-if="showRecipeModal" class="fixed bottom-0 right-0 top-0 z-50 w-full max-w-xl bg-white shadow-2xl flex flex-col overflow-hidden">
+      <div v-if="showRecipeModal" class="fixed bottom-0 right-0 top-0 z-50 w-full max-w-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
         <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div>
             <div class="flex items-center gap-2">
-              <h3 class="text-xl font-black text-slate-900">Recipe: {{ recipeDish?.name }}</h3>
+              <h3 class="text-xl font-black text-slate-900">Recipe & Costing: {{ recipeDish?.name }}</h3>
               <span class="text-xs font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded">{{ recipeDish?.category }}</span>
             </div>
-            <p class="text-xs text-slate-500 mt-1">Configure batch ingredients, quantities, and verify live allergen mappings.</p>
+            <p class="text-xs text-slate-500 mt-1">Configure batch ingredients, quantities, unit costs, and target safe margins.</p>
           </div>
           <button @click="closeRecipeModal" class="text-slate-400 hover:text-slate-700 transition-colors"><X :size="20" /></button>
         </div>
 
-        <div class="p-6 flex-1 overflow-y-auto space-y-6">
+        <div class="p-6 flex-1 overflow-y-auto space-y-5">
           <div class="flex items-center justify-between gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
             <div>
               <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">Batch Yield Servings</label>
-              <input type="number" v-model.number="recipeForm.yield_servings" min="1" class="w-24 px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-slate-900 outline-none focus:border-emerald-500" />
+              <input type="number" v-model.number="recipeForm.yield_servings" @input="calculateFoodCost" min="1" class="w-24 px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-slate-900 outline-none focus:border-emerald-500 bg-white" />
             </div>
 
             <button 
@@ -334,6 +334,56 @@
               <Sparkles :size="14" :class="{'animate-spin': isSuggestingRecipe}" />
               <span>{{ isSuggestingRecipe ? 'Consulting AI...' : 'Suggest Recipe (AI)' }}</span>
             </button>
+          </div>
+
+          <!-- Financials & Margin Engine Card -->
+          <div class="p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-xl shadow-lg border border-slate-700">
+            <div class="flex items-center justify-between mb-3 border-b border-slate-700/80 pb-2.5">
+              <div class="flex items-center gap-2">
+                <span class="text-base">📊</span>
+                <h4 class="text-xs font-black uppercase tracking-wider text-slate-200">
+                  Food Cost & Margin Engine (2.5x Markup)
+                </h4>
+              </div>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Target 40% Food Cost
+              </span>
+            </div>
+
+            <div class="grid grid-cols-3 gap-3 mb-4">
+              <div class="bg-white/5 p-3 rounded-lg border border-white/10">
+                <div class="text-[10px] font-bold text-slate-400 uppercase">Batch Food Cost</div>
+                <div class="text-lg font-black text-white mt-0.5">₱{{ (recipeForm.total_batch_cost || 0).toFixed(2) }}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5">For {{ recipeForm.yield_servings }} portions</div>
+              </div>
+
+              <div class="bg-white/5 p-3 rounded-lg border border-white/10">
+                <div class="text-[10px] font-bold text-slate-400 uppercase">Cost / Serving</div>
+                <div class="text-lg font-black text-amber-300 mt-0.5">₱{{ (recipeForm.cost_per_serving || 0).toFixed(2) }}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5">Per-portion raw cost</div>
+              </div>
+
+              <div class="bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/30">
+                <div class="text-[10px] font-bold text-emerald-400 uppercase">Suggested Floor</div>
+                <div class="text-xl font-black text-emerald-400 mt-0.5">₱{{ (recipeForm.suggested_price_floor || 0).toFixed(2) }}</div>
+                <div class="text-[10px] text-emerald-300/80 mt-0.5">Cost × 2.5</div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-700/80 text-xs">
+              <div class="text-slate-300">
+                Current Floor: <span class="font-bold text-white">₱{{ recipeDish?.price_floor || recipeDish?.base_price || 0 }}</span>
+                <span class="text-slate-400 text-[11px] ml-1.5">(Base: ₱{{ recipeDish?.base_price || 0 }})</span>
+              </div>
+
+              <button 
+                @click="applySuggestedPriceFloor" 
+                :disabled="(recipeForm.suggested_price_floor || 0) <= 0 || isApplyingFloor"
+                class="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-lg transition-all shadow-md active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                <span>Apply Suggested Floor (₱{{ (recipeForm.suggested_price_floor || 0).toFixed(2) }})</span>
+              </button>
+            </div>
           </div>
 
           <!-- Live Allergen Preview -->
@@ -366,48 +416,85 @@
             </div>
           </div>
 
-          <!-- Ingredients List -->
+          <!-- Ingredients List with Unit Costing -->
           <div>
             <div class="flex justify-between items-center mb-2">
-              <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Recipe Ingredients</label>
+              <label class="text-xs font-bold text-slate-600 uppercase tracking-wider">Recipe Ingredients & Raw Costs</label>
               <button @click="addRecipeIngredientRow" class="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
                 <Plus :size="14" />
                 <span>Add Ingredient</span>
               </button>
             </div>
 
-            <div class="space-y-2">
-              <div v-for="(ing, idx) in recipeForm.ingredients" :key="idx" class="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                <input 
-                  type="text" 
-                  v-model="ing.name" 
-                  @input="onIngredientNameChange"
-                  placeholder="Ingredient name (e.g. Garlic, Chicken Thigh)" 
-                  class="flex-1 px-3 py-1.5 border border-slate-300 rounded font-medium text-sm outline-none focus:border-emerald-500" 
-                />
-                <input 
-                  type="number" 
-                  step="0.1" 
-                  min="0.1" 
-                  v-model.number="ing.quantity" 
-                  class="w-20 px-2 py-1.5 border border-slate-300 rounded font-bold text-sm outline-none focus:border-emerald-500" 
-                />
-                <select 
-                  v-model="ing.unit" 
-                  class="w-20 px-2 py-1.5 border border-slate-300 rounded font-semibold text-xs bg-white outline-none focus:border-emerald-500"
-                >
-                  <option value="g">g</option>
-                  <option value="kg">kg</option>
-                  <option value="ml">ml</option>
-                  <option value="l">l</option>
-                  <option value="pc">pc</option>
-                  <option value="tbsp">tbsp</option>
-                  <option value="tsp">tsp</option>
-                  <option value="cup">cup</option>
-                </select>
-                <button @click="removeRecipeIngredientRow(idx)" class="text-slate-400 hover:text-rose-600 p-1">
-                  <Trash2 :size="16" />
-                </button>
+            <div class="space-y-2.5">
+              <div v-for="(ing, idx) in recipeForm.ingredients" :key="idx" class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                <div class="flex items-center gap-2">
+                  <input 
+                    type="text" 
+                    v-model="ing.name" 
+                    @input="onIngredientNameChange"
+                    placeholder="Ingredient name (e.g. Chicken, Garlic)" 
+                    class="flex-1 px-3 py-1.5 border border-slate-300 rounded font-medium text-sm outline-none focus:border-emerald-500 bg-white" 
+                  />
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    min="0.1" 
+                    v-model.number="ing.quantity" 
+                    @input="calculateFoodCost"
+                    class="w-20 px-2 py-1.5 border border-slate-300 rounded font-bold text-sm outline-none focus:border-emerald-500 bg-white" 
+                  />
+                  <select 
+                    v-model="ing.unit" 
+                    @change="calculateFoodCost"
+                    class="w-20 px-2 py-1.5 border border-slate-300 rounded font-semibold text-xs bg-white outline-none focus:border-emerald-500"
+                  >
+                    <option value="g">g</option>
+                    <option value="kg">kg</option>
+                    <option value="ml">ml</option>
+                    <option value="l">l</option>
+                    <option value="pc">pc</option>
+                    <option value="tbsp">tbsp</option>
+                    <option value="tsp">tsp</option>
+                    <option value="cup">cup</option>
+                  </select>
+                  <button @click="removeRecipeIngredientRow(idx)" class="text-slate-400 hover:text-rose-600 p-1.5 transition-colors">
+                    <Trash2 :size="16" />
+                  </button>
+                </div>
+
+                <!-- Unit Cost Input & Portioned Food Cost -->
+                <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-200/60 text-xs">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-slate-400 font-bold">Cost:</span>
+                    <span class="text-slate-500 font-semibold">₱</span>
+                    <input 
+                      type="number" 
+                      step="0.5" 
+                      min="0" 
+                      v-model.number="ing.unit_cost" 
+                      @input="calculateFoodCost"
+                      placeholder="0.00" 
+                      class="w-20 px-2 py-1 border border-slate-300 rounded text-xs font-bold outline-none focus:border-emerald-500 bg-white text-slate-800"
+                    />
+                    <span class="text-slate-400">per</span>
+                    <select 
+                      v-model="ing.cost_unit" 
+                      @change="calculateFoodCost"
+                      class="px-2 py-1 border border-slate-300 rounded text-xs font-medium bg-white outline-none focus:border-emerald-500"
+                    >
+                      <option value="kg">kg</option>
+                      <option value="g">g</option>
+                      <option value="l">l</option>
+                      <option value="ml">ml</option>
+                      <option value="pc">pc</option>
+                    </select>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-slate-400 text-[11px] mr-1">Portion Cost:</span>
+                    <span class="font-black text-slate-900">₱{{ (ing.item_cost || 0).toFixed(2) }}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -568,13 +655,17 @@ const isSavingRecipe = ref(false)
 const prepPlanData = ref({ total_dishes: 0, total_servings: 0, dishes: [], prep_list: [] })
 let debounceTimer = null
 
+const isApplyingFloor = ref(false)
 const recipeForm = reactive({
   yield_servings: 10,
   instructions: '',
   ingredients: [],
   allergens: [],
   sensitivities: [],
-  has_unmapped: false
+  has_unmapped: false,
+  total_batch_cost: 0,
+  cost_per_serving: 0,
+  suggested_price_floor: 0
 })
 
 const formatDateTimeLocal = (date) => {
@@ -757,6 +848,59 @@ const openPrepListModal = () => {
   showPrepModal.value = true
 }
 
+const calculateIngredientItemCost = (qty, unit, cost, costUnit) => {
+  if (!cost || cost <= 0 || !qty || qty <= 0) return 0
+  const rUnit = (unit || '').toLowerCase().trim()
+  const cUnit = (costUnit || '').toLowerCase().trim()
+
+  if (rUnit === cUnit) {
+    return qty * cost
+  }
+
+  // Mass
+  if (['g', 'gram', 'grams'].includes(rUnit) && ['kg', 'kilo', 'kilogram'].includes(cUnit)) {
+    return (qty / 1000) * cost
+  }
+  if (['kg', 'kilo', 'kilogram'].includes(rUnit) && ['g', 'gram', 'grams'].includes(cUnit)) {
+    return (qty * 1000) * cost
+  }
+
+  // Volume
+  if (['ml', 'milliliter'].includes(rUnit) && ['l', 'liter', 'liters'].includes(cUnit)) {
+    return (qty / 1000) * cost
+  }
+  if (['l', 'liter', 'liters'].includes(rUnit) && ['ml', 'milliliter'].includes(cUnit)) {
+    return (qty * 1000) * cost
+  }
+
+  // Count
+  if (['pc', 'pcs', 'piece'].includes(rUnit) && ['pc', 'pcs', 'piece'].includes(cUnit)) {
+    return qty * cost
+  }
+
+  return 0
+}
+
+const calculateFoodCost = () => {
+  let totalBatch = 0
+  recipeForm.ingredients.forEach(ing => {
+    const cost = calculateIngredientItemCost(
+      ing.quantity,
+      ing.unit,
+      ing.unit_cost,
+      ing.cost_unit
+    )
+    ing.item_cost = Math.round(cost * 100) / 100
+    totalBatch += cost
+  })
+
+  recipeForm.total_batch_cost = Math.round(totalBatch * 100) / 100
+  const servings = Math.max(1, recipeForm.yield_servings || 1)
+  const perServing = totalBatch / servings
+  recipeForm.cost_per_serving = Math.round(perServing * 100) / 100
+  recipeForm.suggested_price_floor = Math.round((perServing * 2.5) * 100) / 100
+}
+
 const openRecipeModal = async (item) => {
   recipeDish.value = item
   recipeForm.yield_servings = 10
@@ -765,6 +909,9 @@ const openRecipeModal = async (item) => {
   recipeForm.allergens = []
   recipeForm.sensitivities = []
   recipeForm.has_unmapped = false
+  recipeForm.total_batch_cost = 0
+  recipeForm.cost_per_serving = 0
+  recipeForm.suggested_price_floor = 0
   showRecipeModal.value = true
 
   try {
@@ -773,15 +920,22 @@ const openRecipeModal = async (item) => {
       const data = await res.json()
       recipeForm.yield_servings = data.yield_servings || 10
       recipeForm.instructions = data.instructions || ''
+      recipeForm.total_batch_cost = data.total_batch_cost || 0
+      recipeForm.cost_per_serving = data.cost_per_serving || 0
+      recipeForm.suggested_price_floor = data.suggested_price_floor || 0
       recipeForm.ingredients = (data.ingredients || []).map(i => ({
         name: i.name,
         quantity: i.quantity,
         unit: i.unit,
+        unit_cost: i.unit_cost || 0,
+        cost_unit: i.cost_unit || (['g', 'kg'].includes((i.unit || '').toLowerCase()) ? 'kg' : (['ml', 'l'].includes((i.unit || '').toLowerCase()) ? 'l' : i.unit)),
+        item_cost: i.item_cost || 0,
         is_unmapped: i.is_unmapped
       }))
       recipeForm.allergens = data.allergens || []
       recipeForm.sensitivities = data.sensitivities || []
       recipeForm.has_unmapped = data.has_unmapped || false
+      calculateFoodCost()
     }
   } catch (err) {
     console.error('Failed to fetch recipe', err)
@@ -798,13 +952,18 @@ const addRecipeIngredientRow = () => {
     name: '',
     quantity: 100,
     unit: 'g',
+    unit_cost: 0,
+    cost_unit: 'kg',
+    item_cost: 0,
     is_unmapped: false
   })
+  calculateFoodCost()
 }
 
 const removeRecipeIngredientRow = (idx) => {
   recipeForm.ingredients.splice(idx, 1)
   updateAllergenPreview()
+  calculateFoodCost()
 }
 
 const updateAllergenPreview = () => {
@@ -829,6 +988,7 @@ const updateAllergenPreview = () => {
 
 const onIngredientNameChange = () => {
   updateAllergenPreview()
+  calculateFoodCost()
 }
 
 const suggestRecipe = async () => {
@@ -863,14 +1023,50 @@ const suggestRecipe = async () => {
       name: i.name,
       quantity: i.quantity,
       unit: i.unit || 'g',
+      unit_cost: 0,
+      cost_unit: ['g', 'kg'].includes((i.unit || '').toLowerCase()) ? 'kg' : (['ml', 'l'].includes((i.unit || '').toLowerCase()) ? 'l' : i.unit),
+      item_cost: 0,
       is_unmapped: false
     }))
     updateAllergenPreview()
-    showToast('Recipe suggested by AI! Review ingredients and click Save Recipe.', 'success')
+    calculateFoodCost()
+    showToast('Recipe suggested by AI! Review ingredients and costs.', 'success')
   } catch (err) {
     showToast('AI suggestion unavailable. Please enter ingredients manually.', 'error')
   } finally {
     isSuggestingRecipe.value = false
+  }
+}
+
+const applySuggestedPriceFloor = async () => {
+  if (!recipeDish.value || (recipeForm.suggested_price_floor || 0) <= 0) return
+  isApplyingFloor.value = true
+  try {
+    const res = await fetch('/api/vendor/dish/price-floor', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        menu_item_id: recipeDish.value.id,
+        price_floor: recipeForm.suggested_price_floor
+      })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      showToast(data.error || 'Failed to apply price floor.', 'error')
+      return
+    }
+
+    recipeDish.value.price_floor = recipeForm.suggested_price_floor
+    const catItem = masterCatalog.value.find(d => d.id === recipeDish.value.id)
+    if (catItem) catItem.price_floor = recipeForm.suggested_price_floor
+    const rosItem = activeRoster.value.find(d => d.id === recipeDish.value.id)
+    if (rosItem) rosItem.price_floor = recipeForm.suggested_price_floor
+
+    showToast(`Price floor updated to ₱${recipeForm.suggested_price_floor.toFixed(2)} (2.5x margin applied)!`, 'success')
+  } catch (err) {
+    showToast(`Failed to update price floor: ${err.message}`, 'error')
+  } finally {
+    isApplyingFloor.value = false
   }
 }
 
@@ -887,7 +1083,13 @@ const saveRecipe = async () => {
       menu_item_id: recipeDish.value.id,
       yield_servings: recipeForm.yield_servings,
       instructions: recipeForm.instructions,
-      ingredients: recipeForm.ingredients
+      ingredients: recipeForm.ingredients.map(i => ({
+        name: i.name,
+        quantity: i.quantity,
+        unit: i.unit,
+        unit_cost: i.unit_cost || 0,
+        cost_unit: i.cost_unit || 'kg'
+      }))
     }
     const res = await fetch('/api/vendor/dish/recipe', {
       method: 'POST',
@@ -900,7 +1102,23 @@ const saveRecipe = async () => {
       return
     }
 
-    showToast('Recipe saved successfully!', 'success')
+    // Also sync ingredient costs
+    const costItems = recipeForm.ingredients
+      .filter(i => (i.unit_cost || 0) > 0 && i.name)
+      .map(i => ({
+        ingredient_name: i.name,
+        cost: i.unit_cost,
+        cost_unit: i.cost_unit || 'kg'
+      }))
+    if (costItems.length > 0) {
+      await fetch('/api/vendor/ingredient-costs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: costItems })
+      })
+    }
+
+    showToast('Recipe & ingredient costs saved successfully!', 'success')
     recipeForm.allergens = data.allergens_preview || []
     recipeForm.has_unmapped = data.has_unmapped || false
     closeRecipeModal()

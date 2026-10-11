@@ -892,6 +892,131 @@ function handleGetDailyAudit($pdo) {
     ]);
 }
 
+function calculateIngredientItemCost($recipeQty, $recipeUnit, $cost, $costUnit) {
+    if ($cost <= 0 || $recipeQty <= 0) {
+        return 0.0;
+    }
+
+    $rUnit = strtolower(trim($recipeUnit));
+    $cUnit = strtolower(trim($costUnit));
+
+    // Direct unit match
+    if ($rUnit === $cUnit) {
+        return (float)($recipeQty * $cost);
+    }
+
+    // Mass conversions (g <-> kg)
+    if (in_array($rUnit, ['g', 'gram', 'grams'], true) && in_array($cUnit, ['kg', 'kilo', 'kilogram', 'kilograms'], true)) {
+        return (float)(($recipeQty / 1000.0) * $cost);
+    }
+    if (in_array($rUnit, ['kg', 'kilo', 'kilogram', 'kilograms'], true) && in_array($cUnit, ['g', 'gram', 'grams'], true)) {
+        return (float)(($recipeQty * 1000.0) * $cost);
+    }
+
+    // Volume conversions (ml <-> l)
+    if (in_array($rUnit, ['ml', 'milliliter', 'milliliters'], true) && in_array($cUnit, ['l', 'liter', 'liters'], true)) {
+        return (float)(($recipeQty / 1000.0) * $cost);
+    }
+    if (in_array($rUnit, ['l', 'liter', 'liters'], true) && in_array($cUnit, ['ml', 'milliliter', 'milliliters'], true)) {
+        return (float)(($recipeQty * 1000.0) * $cost);
+    }
+
+    // Count conversions (pc, pcs, piece, pieces)
+    if (in_array($rUnit, ['pc', 'pcs', 'piece', 'pieces'], true) && in_array($cUnit, ['pc', 'pcs', 'piece', 'pieces'], true)) {
+        return (float)($recipeQty * $cost);
+    }
+
+    // Incompatible units (e.g. recipe is 'tsp' or 'cup' while cost is 'kg')
+    // Per execution notes: fallback to 0.0
+    return 0.0;
+}
+
+function handleGetIngredientCosts($pdo) {
+    $store_id = requireVendor($pdo);
+    $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? ORDER BY ingredient_name ASC");
+    $stmt->execute([$store_id]);
+    jsonResponse($stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function handleSaveIngredientCosts($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    $items = [];
+    if (isset($input['items']) && is_array($input['items'])) {
+        $items = $input['items'];
+    } elseif (isset($input['ingredient_name']) || isset($input['name'])) {
+        $items = [$input];
+    }
+
+    if (empty($items)) {
+        jsonResponse(['error' => 'No ingredient costs provided'], 400);
+    }
+
+    $findTaxStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+    $upsertStmt = $pdo->prepare("
+        INSERT INTO vendor_ingredient_costs (store_id, ingredient_id, ingredient_name, cost, cost_unit)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            ingredient_id = VALUES(ingredient_id),
+            cost = VALUES(cost),
+            cost_unit = VALUES(cost_unit),
+            updated_at = CURRENT_TIMESTAMP
+    ");
+
+    $saved = [];
+    foreach ($items as $item) {
+        $name = trim($item['ingredient_name'] ?? $item['name'] ?? '');
+        if ($name === '') continue;
+        $cost = max(0, (float)($item['cost'] ?? 0));
+        $unit = trim($item['cost_unit'] ?? $item['unit'] ?? 'kg');
+
+        $findTaxStmt->execute([$name]);
+        $ingId = $findTaxStmt->fetchColumn() ?: null;
+
+        $upsertStmt->execute([$store_id, $ingId, $name, $cost, $unit]);
+        $saved[] = [
+            'store_id' => $store_id,
+            'ingredient_id' => $ingId,
+            'ingredient_name' => $name,
+            'cost' => $cost,
+            'cost_unit' => $unit
+        ];
+    }
+
+    jsonResponse(['message' => 'Ingredient costs saved', 'count' => count($saved), 'saved' => $saved]);
+}
+
+function handleApplyPriceFloor($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    $menu_item_id = (int)($input['menu_item_id'] ?? 0);
+    $price_floor = (float)($input['price_floor'] ?? 0);
+
+    if ($menu_item_id <= 0 || $price_floor <= 0) {
+        jsonResponse(['error' => 'Invalid menu_item_id or price_floor'], 400);
+    }
+
+    $stmtCheck = $pdo->prepare("SELECT id, name, base_price FROM menu_items WHERE id = ? AND store_id = ?");
+    $stmtCheck->execute([$menu_item_id, $store_id]);
+    $dish = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+
+    if (!$dish) {
+        jsonResponse(['error' => 'Dish not found or does not belong to your store'], 404);
+    }
+
+    $stmtUpdate = $pdo->prepare("UPDATE menu_items SET price_floor = ? WHERE id = ? AND store_id = ?");
+    $stmtUpdate->execute([$price_floor, $menu_item_id, $store_id]);
+
+    jsonResponse([
+        'message' => 'Price floor updated successfully',
+        'menu_item_id' => $menu_item_id,
+        'price_floor' => $price_floor,
+        'dish_name' => $dish['name']
+    ]);
+}
+
 function handleGetRecipe($pdo) {
     $store_id = requireVendor($pdo);
     $menu_item_id = isset($_GET['menu_item_id']) ? (int)$_GET['menu_item_id'] : 0;
@@ -899,11 +1024,25 @@ function handleGetRecipe($pdo) {
         jsonResponse(['error' => 'Missing or invalid menu_item_id'], 400);
     }
 
-    $stmtDish = $pdo->prepare("SELECT id, name, base_price, category FROM menu_items WHERE id = ? AND store_id = ?");
+    $stmtDish = $pdo->prepare("SELECT id, name, base_price, price_floor, category FROM menu_items WHERE id = ? AND store_id = ?");
     $stmtDish->execute([$menu_item_id, $store_id]);
     $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
     if (!$dish) {
         jsonResponse(['error' => 'Dish not found or does not belong to your store'], 404);
+    }
+
+    // Load store's saved ingredient costs
+    $stmtCosts = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ?");
+    $stmtCosts->execute([$store_id]);
+    $allCosts = $stmtCosts->fetchAll(PDO::FETCH_ASSOC);
+
+    $costMapById = [];
+    $costMapByName = [];
+    foreach ($allCosts as $c) {
+        if (!empty($c['ingredient_id'])) {
+            $costMapById[(int)$c['ingredient_id']] = $c;
+        }
+        $costMapByName[strtolower(trim($c['ingredient_name']))] = $c;
     }
 
     $stmtRecipe = $pdo->prepare("SELECT * FROM recipes WHERE menu_item_id = ?");
@@ -915,12 +1054,18 @@ function handleGetRecipe($pdo) {
             'exists' => false,
             'menu_item_id' => $menu_item_id,
             'dish_name' => $dish['name'],
+            'base_price' => (float)$dish['base_price'],
+            'current_price_floor' => (float)$dish['price_floor'],
             'yield_servings' => 1,
             'instructions' => '',
             'ingredients' => [],
             'allergens' => [],
             'sensitivities' => [],
-            'has_unmapped' => false
+            'has_unmapped' => false,
+            'total_batch_cost' => 0.0,
+            'cost_per_serving' => 0.0,
+            'suggested_price_floor' => 0.0,
+            'margin_multiplier' => 2.5
         ]);
     }
 
@@ -938,6 +1083,7 @@ function handleGetRecipe($pdo) {
     $ingredients = [];
     $hasUnmapped = false;
     $ingredientIds = [];
+    $totalBatchCost = 0.0;
 
     foreach ($rawIngredients as $ri) {
         $isUnmapped = empty($ri['ingredient_id']);
@@ -946,12 +1092,34 @@ function handleGetRecipe($pdo) {
         } else {
             $ingredientIds[] = (int)$ri['ingredient_id'];
         }
+
+        // Match against vendor saved costs
+        $matchedCost = null;
+        if (!empty($ri['ingredient_id']) && isset($costMapById[(int)$ri['ingredient_id']])) {
+            $matchedCost = $costMapById[(int)$ri['ingredient_id']];
+        } else {
+            $cleanName = strtolower(trim($ri['ingredient_name']));
+            if (isset($costMapByName[$cleanName])) {
+                $matchedCost = $costMapByName[$cleanName];
+            }
+        }
+
+        $unitCost = $matchedCost ? (float)$matchedCost['cost'] : 0.0;
+        $costUnit = $matchedCost ? $matchedCost['cost_unit'] : (in_array(strtolower($ri['unit']), ['g', 'kg']) ? 'kg' : (in_array(strtolower($ri['unit']), ['ml', 'l']) ? 'l' : $ri['unit']));
+        $itemTotalCost = $matchedCost ? calculateIngredientItemCost((float)$ri['quantity'], $ri['unit'], $unitCost, $matchedCost['cost_unit']) : 0.0;
+
+        $totalBatchCost += $itemTotalCost;
+
         $ingredients[] = [
             'id' => (int)$ri['id'],
             'ingredient_id' => $ri['ingredient_id'] ? (int)$ri['ingredient_id'] : null,
             'name' => $ri['ingredient_name'],
             'quantity' => (float)$ri['quantity'],
             'unit' => $ri['unit'],
+            'unit_cost' => $unitCost,
+            'cost_unit' => $costUnit,
+            'item_cost' => round($itemTotalCost, 2),
+            'has_cost' => ($matchedCost !== null && $unitCost > 0),
             'is_unmapped' => $isUnmapped
         ];
     }
@@ -980,17 +1148,27 @@ function handleGetRecipe($pdo) {
     $stmtSens->execute([$menu_item_id]);
     $sensitivities = $stmtSens->fetchAll(PDO::FETCH_COLUMN);
 
+    $yieldServings = max(1, (int)$recipe['yield_servings']);
+    $costPerServing = round($totalBatchCost / (float)$yieldServings, 2);
+    $suggestedPriceFloor = round($costPerServing * 2.5, 2);
+
     jsonResponse([
         'exists' => true,
         'id' => (int)$recipe['id'],
         'menu_item_id' => $menu_item_id,
         'dish_name' => $dish['name'],
-        'yield_servings' => (int)$recipe['yield_servings'],
+        'base_price' => (float)$dish['base_price'],
+        'current_price_floor' => (float)$dish['price_floor'],
+        'yield_servings' => $yieldServings,
         'instructions' => $recipe['instructions'] ?? '',
         'ingredients' => $ingredients,
         'allergens' => $allergens,
         'sensitivities' => $sensitivities,
-        'has_unmapped' => $hasUnmapped
+        'has_unmapped' => $hasUnmapped,
+        'total_batch_cost' => round($totalBatchCost, 2),
+        'cost_per_serving' => $costPerServing,
+        'suggested_price_floor' => $suggestedPriceFloor,
+        'margin_multiplier' => 2.5
     ]);
 }
 
