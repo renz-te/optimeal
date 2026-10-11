@@ -38,6 +38,10 @@ function requireRole($pdo, array $allowedRoles) {
     return $_SESSION;
 }
 
+function requireAdmin($pdo) {
+    return requireRole($pdo, ['admin']);
+}
+
 // Simple Router Pattern
 if ($route === '/auth/register' && $method === 'POST') {
     require 'routes/auth.php';
@@ -90,6 +94,15 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/menu/launch' && $method === 'POST') {
     require 'routes/vendor.php';
     handleLaunchMenu($pdo);
+} elseif ($route === '/admin/users' && $method === 'GET') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleGetUsers($pdo);
+} elseif ($route === '/admin/users' && $method === 'POST') {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleCreateUser($pdo);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }
+

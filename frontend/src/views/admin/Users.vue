@@ -5,10 +5,15 @@
         <h1 class="text-3xl font-black text-slate-900 tracking-tight">User Management</h1>
         <p class="text-slate-500 mt-1 font-medium">Manage accounts, configure dietary bounds, and simulate user sessions.</p>
       </div>
-      <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-bold shadow-sm transition-colors flex items-center space-x-2">
+      <button @click="openCreateModal" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-bold shadow-sm transition-colors flex items-center space-x-2">
         <UserPlus :size="18" />
         <span>Invite User</span>
       </button>
+    </div>
+
+    <div v-if="usersError" class="mb-6 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl text-sm font-semibold flex items-center">
+      <svg class="w-5 h-5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+      {{ usersError }}
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -22,7 +27,18 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          <tr v-for="user in mockUsers" :key="user.id" class="hover:bg-slate-50/50 transition-colors">
+          <tr v-if="loadingUsers">
+            <td colspan="4" class="px-6 py-8 text-center text-slate-500 font-medium">
+              <span class="inline-block animate-spin w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full mr-2 align-middle"></span>
+              Loading users from server...
+            </td>
+          </tr>
+          <tr v-else-if="users.length === 0">
+            <td colspan="4" class="px-6 py-8 text-center text-slate-400 font-medium italic">
+              No users found. Click "Invite User" to create an account.
+            </td>
+          </tr>
+          <tr v-for="user in users" :key="user.id" class="hover:bg-slate-50/50 transition-colors">
             <td class="px-6 py-4">
               <div class="font-bold text-slate-900">{{ user.name }}</div>
               <div class="text-xs text-slate-500 mt-0.5">{{ user.email }}</div>
@@ -30,7 +46,7 @@
             <td class="px-6 py-4">
               <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
                     :class="user.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : (user.role === 'vendor' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700')">
-                {{ user.role.charAt(0).toUpperCase() + user.role.slice(1) }}
+                {{ user.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1)) : 'Unknown' }}
               </span>
             </td>
             <td class="px-6 py-4">
@@ -54,6 +70,64 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Create User Modal -->
+    <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col">
+        <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div>
+            <h3 class="text-xl font-bold text-slate-900">Create New User</h3>
+            <p class="text-xs text-slate-500 mt-1">Add a vendor, student, or admin account.</p>
+          </div>
+          <button @click="showCreateModal = false" class="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <form @submit.prevent="handleCreateUser" class="p-6 space-y-4">
+          <div v-if="createError" class="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-lg text-sm font-semibold flex items-center">
+            <svg class="w-5 h-5 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            {{ createError }}
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1">Full Name / Stall Name</label>
+            <input v-model="createForm.name" type="text" required placeholder="e.g. Test Vendor or Juan Dela Cruz"
+                   class="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-sm font-medium">
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1">Email Address</label>
+            <input v-model="createForm.email" type="email" required placeholder="e.g. testvendor@optimeal.test"
+                   class="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-sm font-medium">
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1">Role</label>
+            <select v-model="createForm.role" required
+                    class="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-sm font-semibold bg-white">
+              <option value="vendor">Vendor</option>
+              <option value="student">Student / Customer</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-slate-700 mb-1">Password</label>
+            <input v-model="createForm.password" type="password" required placeholder="••••••••" minlength="6"
+                   class="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all text-sm font-medium">
+          </div>
+
+          <div class="pt-2 flex justify-end space-x-3">
+            <button type="button" @click="showCreateModal = false" class="px-4 py-2 rounded-lg font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm">Cancel</button>
+            <button type="submit" :disabled="creating" class="px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 shadow-sm transition-colors text-sm flex items-center space-x-2 disabled:opacity-50">
+              <span v-if="creating" class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>
+              <span>Create Account</span>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Edit Flags Modal -->
@@ -116,7 +190,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { UserPlus, Edit2, Play, X } from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
 import { useRouter } from 'vue-router'
@@ -126,36 +200,73 @@ const { activePreviewMode, simulatedDietaryFlags } = useSandbox()
 const { masterTaxonomy } = useTaxonomy()
 const router = useRouter()
 
-const mockUsers = ref([
-  {
-    id: 1,
-    name: 'Juan Dela Cruz',
-    email: 'student@optimeal.test',
-    role: 'customer',
-    dietary_flags: { allergens: ['Peanuts'], sensitivities: ['Spicy / Capsaicin'], dietary: ['No Pork'] }
-  },
-  {
-    id: 2,
-    name: 'Maria Clara',
-    email: 'maria@optimeal.test',
-    role: 'customer',
-    dietary_flags: { allergens: ['Shellfish / Crustaceans'], sensitivities: [], dietary: [] }
-  },
-  {
-    id: 3,
-    name: 'System Administrator',
-    email: 'admin@optimeal.test',
-    role: 'admin',
-    dietary_flags: { allergens: [], sensitivities: [], dietary: [] }
-  },
-  {
-    id: 4,
-    name: 'Main Cafeteria',
-    email: 'canteen@optimeal.test',
-    role: 'vendor',
-    dietary_flags: { allergens: [], sensitivities: [], dietary: [] }
+const users = ref([])
+const loadingUsers = ref(false)
+const usersError = ref('')
+
+const fetchUsers = async () => {
+  loadingUsers.value = true
+  usersError.value = ''
+  try {
+    const res = await fetch('/api/admin/users')
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch users')
+    }
+    users.value = data
+  } catch (err) {
+    console.error('Error fetching users:', err)
+    usersError.value = err.message
+  } finally {
+    loadingUsers.value = false
   }
-])
+}
+
+onMounted(() => {
+  fetchUsers()
+})
+
+const showCreateModal = ref(false)
+const creating = ref(false)
+const createError = ref('')
+const createForm = reactive({
+  name: '',
+  email: '',
+  role: 'vendor',
+  password: ''
+})
+
+const openCreateModal = () => {
+  createError.value = ''
+  createForm.name = ''
+  createForm.email = ''
+  createForm.role = 'vendor'
+  createForm.password = ''
+  showCreateModal.value = true
+}
+
+const handleCreateUser = async () => {
+  createError.value = ''
+  creating.value = true
+  try {
+    const res = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(createForm)
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to create user')
+    }
+    showCreateModal.value = false
+    await fetchUsers()
+  } catch (err) {
+    console.error('Error creating user:', err)
+    createError.value = err.message
+  } finally {
+    creating.value = false
+  }
+}
 
 const editingUser = ref(null)
 const editForm = reactive({
@@ -196,7 +307,6 @@ const saveFlags = () => {
       sensitivities: [...editForm.sensitivities],
       dietary: [...editForm.dietary]
     }
-    // Note: In real app, make API call here.
   }
   editingUser.value = null
 }
@@ -208,3 +318,4 @@ const testAsUser = (user) => {
   router.push('/customer/menu')
 }
 </script>
+
