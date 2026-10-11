@@ -34,7 +34,7 @@
     </div>
 
     <!-- Top Summary Metrics Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
       <!-- Total Revenue -->
       <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
         <div class="flex justify-between items-start">
@@ -52,6 +52,51 @@
           <span>From claimed orders</span>
           <span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
             {{ auditData.summary?.claimed_orders || 0 }} claimed
+          </span>
+        </div>
+      </div>
+
+      <!-- Cost of Goods Sold (COGS) -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Cost of Goods Sold (COGS)</p>
+            <h2 class="text-3xl font-black text-slate-800 mt-2">
+              ₱{{ formatMoney(auditData.summary?.total_cogs || 0) }}
+            </h2>
+          </div>
+          <div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center font-bold text-lg">
+            <Package class="w-5 h-5 text-slate-600" />
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
+          <span>Recipe food cost of sold viands</span>
+          <span class="text-slate-600 font-bold bg-slate-100 px-2 py-0.5 rounded-md">
+            Dynamic Food Cost
+          </span>
+        </div>
+      </div>
+
+      <!-- Gross Profit & Profit Margin % -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Gross Profit</p>
+            <h2 class="text-3xl font-black mt-2" :class="(auditData.summary?.gross_profit || 0) >= 0 ? 'text-indigo-600' : 'text-rose-600'">
+              ₱{{ formatMoney(auditData.summary?.gross_profit || 0) }}
+            </h2>
+          </div>
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg" :class="(auditData.summary?.gross_profit || 0) >= 0 ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'">
+            <DollarSign class="w-5 h-5" />
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
+          <span>Gross Margin</span>
+          <span 
+            class="px-2 py-0.5 rounded-md font-bold text-xs" 
+            :class="(auditData.summary?.gross_margin_pct || 0) >= 50 ? 'bg-emerald-100 text-emerald-800' : ((auditData.summary?.gross_margin_pct || 0) > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800')"
+          >
+            {{ Number(auditData.summary?.gross_margin_pct || 0).toFixed(1) }}% Margin
           </span>
         </div>
       </div>
@@ -102,7 +147,7 @@
       <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
         <div class="flex justify-between items-start">
           <div>
-            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Unsold stock value (at menu price)</p>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Unsold Stock Value</p>
             <h2 class="text-3xl font-black text-amber-600 mt-2">
               ₱{{ formatMoney(auditData.summary?.unsold_stock_value ?? auditData.summary?.total_waste_value ?? 0) }}
             </h2>
@@ -111,9 +156,15 @@
             <Scale class="w-5 h-5 text-amber-600" />
           </div>
         </div>
-        <div class="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1 text-xs font-semibold text-slate-500">
-          <span>On sale: <strong class="text-emerald-700">₱{{ formatMoney(auditData.summary?.total_on_sale_value || 0) }}</strong></span>
-          <span>Written off: <strong class="text-rose-700">₱{{ formatMoney(auditData.summary?.total_written_off_value || 0) }}</strong></span>
+        <div class="mt-4 pt-3 border-t border-slate-100 flex flex-col gap-1 text-xs font-semibold text-slate-500">
+          <div class="flex items-center justify-between">
+            <span>Actual Raw Cost Lost/At Risk:</span>
+            <span class="text-rose-600 font-bold">₱{{ formatMoney(auditData.summary?.waste_actual_cost || 0) }}</span>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-400">
+            <span>On sale: <strong class="text-emerald-700">₱{{ formatMoney(auditData.summary?.total_on_sale_value || 0) }}</strong></span>
+            <span>Written off: <strong class="text-rose-700">₱{{ formatMoney(auditData.summary?.total_written_off_value || 0) }}</strong></span>
+          </div>
         </div>
       </div>
     </div>
@@ -137,8 +188,10 @@
               <th class="px-6 py-4">Viand / Dish</th>
               <th class="px-6 py-4">Category</th>
               <th class="px-6 py-4 text-center">Remaining Stock</th>
+              <th class="px-6 py-4 text-right">Cost / Serving</th>
               <th class="px-6 py-4 text-right">Base Price</th>
-              <th class="px-6 py-4 text-right">Unsold stock value (at menu price)</th>
+              <th class="px-6 py-4 text-right">Actual Cost Lost</th>
+              <th class="px-6 py-4 text-right">Unsold stock value</th>
               <th class="px-6 py-4">Cooked At</th>
               <th class="px-6 py-4">Sell-By Time</th>
               <th class="px-6 py-4 text-center">Status</th>
@@ -146,7 +199,7 @@
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="!auditData.unsold_inventory || auditData.unsold_inventory.length === 0">
-              <td colspan="8" class="text-center py-10 text-slate-400 font-medium">
+              <td colspan="10" class="text-center py-10 text-slate-400 font-medium">
                 No active dishes in today's lineup.
               </td>
             </tr>
@@ -168,7 +221,13 @@
                 </span>
               </td>
               <td class="px-6 py-4 text-right font-medium text-slate-600">
+                ₱{{ formatMoney(item.cost_per_serving || 0) }}
+              </td>
+              <td class="px-6 py-4 text-right font-medium text-slate-600">
                 ₱{{ formatMoney(item.base_price) }}
+              </td>
+              <td class="px-6 py-4 text-right font-bold text-rose-600">
+                ₱{{ formatMoney(item.waste_actual_cost || 0) }}
               </td>
               <td class="px-6 py-4 text-right font-bold text-amber-700">
                 ₱{{ formatMoney(item.unsold_stock_value ?? item.estimated_waste_value) }}
@@ -311,13 +370,21 @@ const auditData = ref({
   date: todayStr,
   summary: {
     total_revenue: 0,
+    total_cogs: 0,
+    gross_profit: 0,
+    gross_margin_pct: 0,
     total_orders: 0,
     claimed_orders: 0,
     cancelled_orders: 0,
     expired_orders: 0,
     active_orders: 0,
     total_unsold_units: 0,
-    total_waste_value: 0,
+    unsold_stock_value: 0,
+    total_on_sale_value: 0,
+    total_written_off_value: 0,
+    waste_actual_cost: 0,
+    on_sale_actual_cost: 0,
+    written_off_actual_cost: 0,
     expired_dishes_count: 0
   },
   unsold_inventory: [],

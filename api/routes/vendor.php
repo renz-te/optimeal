@@ -775,6 +775,66 @@ function handleGetDailyAudit($pdo) {
         $isShopClosed = ($nowTime >= $closeTimeFormat && $nowTime < $openTimeFormat);
     }
 
+    // 0b. Store ingredient costs & recipe cost mapping
+    $stmtCosts = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ?");
+    $stmtCosts->execute([$store_id]);
+    $allCosts = $stmtCosts->fetchAll(PDO::FETCH_ASSOC);
+
+    $costMapById = [];
+    $costMapByName = [];
+    foreach ($allCosts as $c) {
+        if (!empty($c['ingredient_id'])) {
+            $costMapById[(int)$c['ingredient_id']] = $c;
+        }
+        $costMapByName[strtolower(trim($c['ingredient_name']))] = $c;
+    }
+
+    // Fetch recipes and ingredients for this store's dishes
+    $stmtRecipes = $pdo->prepare("
+        SELECT r.id AS recipe_id, r.menu_item_id, r.yield_servings,
+               ri.ingredient_id, ri.ingredient_name, ri.quantity, ri.unit
+        FROM recipes r
+        JOIN menu_items m ON r.menu_item_id = m.id
+        LEFT JOIN recipe_ingredients ri ON r.id = ri.recipe_id
+        WHERE m.store_id = ?
+    ");
+    $stmtRecipes->execute([$store_id]);
+    $recipeRows = $stmtRecipes->fetchAll(PDO::FETCH_ASSOC);
+
+    $dishCostPerServingMap = [];
+    $recipeBatches = [];
+    foreach ($recipeRows as $row) {
+        $menuItemId = (int)$row['menu_item_id'];
+        if (!isset($recipeBatches[$menuItemId])) {
+            $recipeBatches[$menuItemId] = [
+                'yield_servings' => max(1, (int)$row['yield_servings']),
+                'total_batch_cost' => 0.0
+            ];
+        }
+
+        if (!empty($row['ingredient_name']) && (float)$row['quantity'] > 0) {
+            $matchedCost = null;
+            if (!empty($row['ingredient_id']) && isset($costMapById[(int)$row['ingredient_id']])) {
+                $matchedCost = $costMapById[(int)$row['ingredient_id']];
+            } else {
+                $cleanName = strtolower(trim($row['ingredient_name']));
+                if (isset($costMapByName[$cleanName])) {
+                    $matchedCost = $costMapByName[$cleanName];
+                }
+            }
+
+            if ($matchedCost) {
+                $unitCost = (float)$matchedCost['cost'];
+                $itemCost = calculateIngredientItemCost((float)$row['quantity'], $row['unit'], $unitCost, $matchedCost['cost_unit']);
+                $recipeBatches[$menuItemId]['total_batch_cost'] += $itemCost;
+            }
+        }
+    }
+
+    foreach ($recipeBatches as $menuItemId => $data) {
+        $dishCostPerServingMap[$menuItemId] = round($data['total_batch_cost'] / (float)$data['yield_servings'], 2);
+    }
+
     // 1. Aggregated daily order metrics for today in Asia/Manila
     $orderQuery = "
         SELECT 
@@ -791,6 +851,33 @@ function handleGetDailyAudit($pdo) {
     $stmtOrders = $pdo->prepare($orderQuery);
     $stmtOrders->execute([$store_id]);
     $orderSummary = $stmtOrders->fetch(PDO::FETCH_ASSOC);
+
+    // 1b. Compute COGS for claimed orders today
+    $cogsQuery = "
+        SELECT oi.menu_item_id, SUM(oi.quantity) AS qty_sold
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.store_id = ?
+          AND o.status = 'claimed'
+          AND DATE(COALESCE(o.reserved_at, NOW())) = CURDATE()
+        GROUP BY oi.menu_item_id
+    ";
+    $stmtCogs = $pdo->prepare($cogsQuery);
+    $stmtCogs->execute([$store_id]);
+    $soldItems = $stmtCogs->fetchAll(PDO::FETCH_ASSOC);
+
+    $totalCogs = 0.0;
+    foreach ($soldItems as $sold) {
+        $menuItemId = (int)$sold['menu_item_id'];
+        $qtySold = (int)$sold['qty_sold'];
+        $costPerServing = $dishCostPerServingMap[$menuItemId] ?? 0.0;
+        $totalCogs += $costPerServing * $qtySold;
+    }
+
+    $totalRevenue = (float)$orderSummary['total_revenue'];
+    $totalCogs = round($totalCogs, 2);
+    $grossProfit = round($totalRevenue - $totalCogs, 2);
+    $grossMarginPct = ($totalRevenue > 0) ? round(($grossProfit / $totalRevenue) * 100, 1) : 0.0;
 
     // 2. Unsold live inventory / surplus for active dishes (including Walk-in Pool)
     $inventoryQuery = "
@@ -818,6 +905,9 @@ function handleGetDailyAudit($pdo) {
     $totalUnsoldStockValue = 0.0;
     $totalOnSaleValue = 0.0;
     $totalWrittenOffValue = 0.0;
+    $totalWasteActualCost = 0.0;
+    $totalOnSaleActualCost = 0.0;
+    $totalWrittenOffActualCost = 0.0;
     $expiredDishesCount = 0;
     $unsoldItems = [];
 
@@ -825,6 +915,8 @@ function handleGetDailyAudit($pdo) {
     foreach ($rawUnsoldItems as $item) {
         $remainingStock = (int)$item['remaining_stock'];
         $unsoldValue = (float)$item['unsold_stock_value'];
+        $costPerServing = $dishCostPerServingMap[(int)$item['id']] ?? 0.0;
+        $wasteActualCost = round($costPerServing * $remainingStock, 2);
         $isExpired = (!empty($item['sell_by']) && strtotime($item['sell_by']) <= $nowTimestamp);
 
         if ($isExpired) {
@@ -835,14 +927,19 @@ function handleGetDailyAudit($pdo) {
         if ($isExpired || $isShopClosed) {
             $status = 'Expired / closed';
             $totalWrittenOffValue += $unsoldValue;
+            $totalWrittenOffActualCost += $wasteActualCost;
         } else {
             $status = 'On sale';
             $totalOnSaleValue += $unsoldValue;
+            $totalOnSaleActualCost += $wasteActualCost;
         }
 
         $totalUnsoldQty += $remainingStock;
         $totalUnsoldStockValue += $unsoldValue;
+        $totalWasteActualCost += $wasteActualCost;
 
+        $item['cost_per_serving'] = $costPerServing;
+        $item['waste_actual_cost'] = $wasteActualCost;
         $item['status'] = $status;
         $item['is_expired'] = $isExpired ? 1 : 0;
         $item['is_closed'] = $isShopClosed ? 1 : 0;
@@ -872,7 +969,10 @@ function handleGetDailyAudit($pdo) {
     jsonResponse([
         'date' => date('Y-m-d'),
         'summary' => [
-            'total_revenue' => (float)$orderSummary['total_revenue'],
+            'total_revenue' => $totalRevenue,
+            'total_cogs' => $totalCogs,
+            'gross_profit' => $grossProfit,
+            'gross_margin_pct' => $grossMarginPct,
             'total_orders' => (int)$orderSummary['total_orders'],
             'claimed_orders' => (int)$orderSummary['claimed_orders'],
             'cancelled_orders' => (int)$orderSummary['cancelled_orders'],
@@ -882,6 +982,9 @@ function handleGetDailyAudit($pdo) {
             'unsold_stock_value' => round($totalUnsoldStockValue, 2),
             'total_on_sale_value' => round($totalOnSaleValue, 2),
             'total_written_off_value' => round($totalWrittenOffValue, 2),
+            'waste_actual_cost' => round($totalWasteActualCost, 2),
+            'on_sale_actual_cost' => round($totalOnSaleActualCost, 2),
+            'written_off_actual_cost' => round($totalWrittenOffActualCost, 2),
             'expired_dishes_count' => $expiredDishesCount,
             'opening_time' => $openingTime,
             'closing_time' => $closingTime,
