@@ -201,6 +201,13 @@ function handleUpdateOrderStatus($pdo) {
 function handleEnrichDish($pdo) {
     $session = requireRole($pdo, ['vendor', 'admin']);
     
+    // Kill Switch Enforcement
+    $stmt = $pdo->query("SELECT ai_enabled FROM settings WHERE id = 1");
+    $aiEnabled = (int)($stmt->fetchColumn() ?? 1);
+    if ($aiEnabled === 0) {
+        jsonResponse(['error' => 'AI Generation is currently disabled by the Administrator.'], 403);
+    }
+
     // Parse incoming JSON payload
     $input = json_decode(file_get_contents('php://input'), true);
 
@@ -369,29 +376,41 @@ function handleSaveDish($pdo) {
             $prStmt->execute([$dishId]);
         }
     
-    if (!empty($input['ingredientsString'])) {
-        $ingredients = array_filter(array_map('trim', explode(',', $input['ingredientsString'])));
+    $rawIngredients = [];
+    if (!empty($input['ingredients']) && is_array($input['ingredients'])) {
+        $rawIngredients = $input['ingredients'];
+    } elseif (!empty($input['ingredientsString'])) {
+        $rawIngredients = explode(',', $input['ingredientsString']);
+    }
+
+    if (!empty($rawIngredients)) {
+        $ingredients = array_unique(array_filter(array_map('trim', $rawIngredients)));
         
+        $findStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+        $subStmt = $pdo->prepare("INSERT IGNORE INTO ingredient_submissions (raw_name, status) VALUES (?, 'pending')");
+        $mapIngStmt = $pdo->prepare("INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES (?, ?)");
+        $getAllergensStmt = $pdo->prepare("SELECT allergen_id FROM ingredient_allergen_map WHERE ingredient_id = ?");
+        $mapAllergenStmt = $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)");
+
         foreach ($ingredients as $ing) {
-            $stmt = $pdo->prepare("INSERT IGNORE INTO ingredients (name) VALUES (?)");
-            $stmt->execute([$ing]);
-            
-            $stmt = $pdo->prepare("SELECT id FROM ingredients WHERE name = ?");
-            $stmt->execute([$ing]);
-            $ingId = $stmt->fetchColumn();
-            
+            if ($ing === '') continue;
+
+            $findStmt->execute([$ing]);
+            $ingId = $findStmt->fetchColumn();
+
             if ($ingId) {
-                $pdo->prepare("INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES (?, ?)")
-                    ->execute([$dishId, $ingId]);
+                // Recognized ingredient: map to dish and critical allergens
+                $mapIngStmt->execute([$dishId, $ingId]);
                     
-                $stmtMap = $pdo->prepare("SELECT allergen_id FROM ingredient_allergen_map WHERE ingredient_id = ?");
-                $stmtMap->execute([$ingId]);
-                $allergens = $stmtMap->fetchAll(PDO::FETCH_COLUMN);
+                $getAllergensStmt->execute([$ingId]);
+                $allergens = $getAllergensStmt->fetchAll(PDO::FETCH_COLUMN);
                 
                 foreach ($allergens as $allergenId) {
-                    $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)")
-                        ->execute([$dishId, $allergenId]);
+                    $mapAllergenStmt->execute([$dishId, $allergenId]);
                 }
+            } else {
+                // Unrecognized ingredient: intercept and push to ingredient_submissions queue
+                $subStmt->execute([$ing]);
             }
         }
     }

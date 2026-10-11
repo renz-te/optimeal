@@ -108,11 +108,26 @@
               </div>
             </div>
 
+            <!-- AI Kill Switch Warning Banner -->
+            <div v-if="aiDisabled" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs flex items-center gap-2 mb-2">
+              <span class="text-base">⚠️</span>
+              <span class="font-medium">{{ aiDisabledMessage || 'AI Generation is currently disabled by the Administrator.' }}</span>
+            </div>
+
             <div class="flex justify-end pt-2 mb-2">
-              <button @click.prevent="enrichDish" :disabled="isEnriching" class="text-xs font-bold bg-indigo-50 text-indigo-600 px-4 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 disabled:opacity-50">
+              <button 
+                @click.prevent="enrichDish" 
+                :disabled="isEnriching || aiDisabled" 
+                :class="[
+                  'text-xs font-bold px-4 py-2 rounded-lg border transition-colors flex items-center gap-1.5',
+                  aiDisabled 
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60' 
+                    : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100 disabled:opacity-50'
+                ]"
+              >
                  <span v-if="isEnriching" class="animate-spin text-indigo-500">⏳</span>
-                 <span v-else>✨</span>
-                 {{ isEnriching ? 'Analyzing...' : 'Auto-fill with AI' }}
+                 <span v-else>{{ aiDisabled ? '🔒' : '✨' }}</span>
+                 {{ isEnriching ? 'Analyzing...' : (aiDisabled ? 'AI Disabled' : 'Auto-fill with AI') }}
               </button>
             </div>
 
@@ -280,6 +295,8 @@ const formData = reactive({
 })
 
 const isEnriching = ref(false)
+const aiDisabled = ref(false)
+const aiDisabledMessage = ref('')
 
 const enrichDish = async () => {
   if (!formData.name.trim()) {
@@ -299,6 +316,13 @@ const enrichDish = async () => {
     })
 
     const data = await res.json()
+
+    if (res.status === 403) {
+      aiDisabled.value = true
+      aiDisabledMessage.value = data.error || 'AI Generation is currently disabled by the Administrator.'
+      showToast(aiDisabledMessage.value, 'error')
+      return
+    }
 
     if (!res.ok || data.fallback || data.error) {
       showToast(data.error || 'AI currently unavailable. Please enter macros manually.', 'error')
@@ -386,6 +410,8 @@ const closeModal = () => {
   formData.sensitivities = []
   formData.saveToCatalog = false
   formData.isAllergenFree = false
+  aiDisabled.value = false
+  aiDisabledMessage.value = ''
 }
 
 const toggleTag = (group, tag) => {
