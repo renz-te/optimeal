@@ -978,7 +978,6 @@ const processOrder = async (type) => {
       confirmedToken.value = token
     } else {
       const payload = {
-        store_id: 1,
         type: type,
         fulfillment_type: orderType.value,
         items: cart.value.map(c => ({

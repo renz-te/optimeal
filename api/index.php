@@ -46,6 +46,22 @@ function requireStudent($pdo) {
     return requireRole($pdo, ['student', 'customer']);
 }
 
+function requireStaff($pdo) {
+    requireRole($pdo, ['vendor', 'admin']);
+
+    $stmt = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
+    $storeId = $stmt->fetchColumn();
+    if (!$storeId) {
+        $stmt = $pdo->query("SELECT id FROM stores LIMIT 1");
+        $storeId = $stmt->fetchColumn();
+    }
+    if (!$storeId) {
+        jsonResponse(['error' => 'No active cafeteria store found.'], 500);
+    }
+    return (int)$storeId;
+}
+
+
 // Simple Router Pattern
 if ($route === '/auth/register' && $method === 'POST') {
     require 'routes/auth.php';

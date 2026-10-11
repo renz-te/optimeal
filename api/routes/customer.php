@@ -7,7 +7,15 @@ function requireCustomer($pdo) {
 function handleGetMenu($pdo) {
     $store_id = $_GET['store_id'] ?? null;
     if (!$store_id) {
-        jsonResponse(['error' => 'Missing store_id'], 400);
+        $stmtStore = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
+        $store_id = $stmtStore->fetchColumn();
+        if (!$store_id) {
+            $stmtStore = $pdo->query("SELECT id FROM stores LIMIT 1");
+            $store_id = $stmtStore->fetchColumn();
+        }
+    }
+    if (!$store_id) {
+        jsonResponse(['error' => 'Missing store_id and no cafeteria configured'], 400);
     }
 
     $stmt = $pdo->prepare("
@@ -123,15 +131,25 @@ function handleCreateReservation($pdo) {
     $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
     
-    // Expects: { "store_id": 1, "items": [ {"menu_item_id": 1, "quantity": 1, "portion_preference": "lean_meat", "ack": true} ] }
-    if (!isset($input['store_id'], $input['items'])) {
-        jsonResponse(['error' => 'Missing store_id or items'], 400);
+    // Expects: { "items": [ {"menu_item_id": 1, "quantity": 1, "portion_preference": "lean_meat", "ack": true} ] }
+    if (!isset($input['items']) || !is_array($input['items'])) {
+        jsonResponse(['error' => 'Missing items'], 400);
+    }
+
+    // Server-resolved single cafeteria store_id
+    $stmtStore = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
+    $store_id = $stmtStore->fetchColumn();
+    if (!$store_id) {
+        $stmtStore = $pdo->query("SELECT id FROM stores LIMIT 1");
+        $store_id = $stmtStore->fetchColumn();
+    }
+    if (!$store_id) {
+        jsonResponse(['error' => 'No active cafeteria store found.'], 500);
     }
 
     $pdo->beginTransaction();
     try {
         $total_amount = 0;
-        $store_id = $input['store_id'];
         
         do {
             $claimToken = str_pad(random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
@@ -191,12 +209,17 @@ function handleCreateReservation($pdo) {
                 $upsertClaims->execute([$user_id, $item_id, $qty, $qty]);
             }
 
+            $allowedPrefs = ['no_preference', 'lean_meat', 'bone_fat', 'extra_sauce'];
+            $portionPref = in_array($item['portion_preference'] ?? '', $allowedPrefs) 
+                ? $item['portion_preference'] 
+                : 'no_preference';
+
             $insertItem->execute([
                 $order_id, 
                 $item_id, 
                 $qty, 
                 $current_price, 
-                $item['portion_preference'] ?? 'no_preference', 
+                $portionPref, 
                 $item['ack'] ?? 0
             ]);
 

@@ -105,11 +105,11 @@ function handlePostInventory($pdo) {
 }
 
 function handleGetOrders($pdo) {
-    $store_id = requireVendor($pdo);
+    $store_id = requireStaff($pdo);
     
     $stmt = $pdo->prepare("
         SELECT o.id, o.user_id, o.status, o.total_amount, o.claim_token, o.reserved_at,
-               o.fulfillment_type, u.name as customer_name
+               o.fulfillment_type, o.handled_by, u.name as customer_name
         FROM orders o
         JOIN users u ON o.user_id = u.id
         WHERE o.store_id = ? AND o.status IN ('reserved', 'paid', 'claimed')
@@ -145,7 +145,7 @@ function handleGetOrders($pdo) {
 }
 
 function handleUpdateOrderStatus($pdo) {
-    $store_id = requireVendor($pdo);
+    $store_id = requireStaff($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
 
     if (empty($input['order_id']) || empty($input['status'])) {
@@ -175,8 +175,9 @@ function handleUpdateOrderStatus($pdo) {
             throw new Exception("Cannot change status of a " . $order['status'] . " order.");
         }
 
-        $updateStmt = $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?");
-        $updateStmt->execute([$status, $order_id]);
+        $staffUserId = $_SESSION['user_id'];
+        $updateStmt = $pdo->prepare("UPDATE orders SET status = ?, handled_by = ? WHERE id = ?");
+        $updateStmt->execute([$status, $staffUserId, $order_id]);
 
         if ($status === 'cancelled') {
             $itemStmt = $pdo->prepare("SELECT menu_item_id, quantity FROM order_items WHERE order_id = ?");
