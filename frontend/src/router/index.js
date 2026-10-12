@@ -33,6 +33,7 @@ const routes = [
       { path: 'orders', component: () => import('../views/vendor/Orders.vue') },
       { path: 'roster', name: 'VendorRoster', component: () => import('../views/vendor/DailyRoster.vue') },
       { path: 'catalog', redirect: '/vendor/roster' },
+      { path: 'prices', name: 'VendorPrices', component: () => import('../views/vendor/IngredientPrices.vue') },
       { path: 'decay', component: () => import('../views/vendor/DecayRules.vue') },
       { path: 'audit', component: () => import('../views/vendor/DailyAudit.vue') },
       { path: 'summary', redirect: '/vendor/audit' }

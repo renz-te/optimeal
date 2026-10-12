@@ -54,6 +54,9 @@ if ($tzRow['sess_tz'] === '+08:00' && $phpTz === 'Asia/Manila') {
     echo "✗ TEST 1 FAILED: Timezone is not properly locked.\n\n";
 }
 
+$origClosing = $pdo->query("SELECT closing_time FROM settings WHERE id = 1")->fetchColumn();
+$pdo->query("UPDATE settings SET closing_time = '23:59' WHERE id = 1");
+
 // Setup users and menu data for tests
 // 1. Get or create student user
 $studentStmt = $pdo->prepare("SELECT id FROM users WHERE email = 'student@optimeal.test'");
@@ -250,6 +253,9 @@ if ($auditRes['status'] === 200) {
 
 } finally {
     if (isset($pdo)) {
+        if (!empty($origClosing)) {
+            $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
+        }
         $pdo->exec("
             DELETE FROM order_items WHERE menu_item_id IN (901, 902);
             DELETE FROM orders WHERE id NOT IN (SELECT DISTINCT order_id FROM order_items);

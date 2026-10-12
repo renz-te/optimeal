@@ -44,6 +44,9 @@ function apiRequest($url, $method = 'GET', $data = null, $cookieFile = null) {
 echo "=== PHASE C7: VENDOR DAILY AUDIT SUMMARY VERIFICATION ===\n\n";
 
 $testOrderId = null;
+$origClosing = $pdo->query("SELECT closing_time FROM settings WHERE id = 1")->fetchColumn();
+$pdo->query("UPDATE settings SET closing_time = '23:59' WHERE id = 1");
+
 try {
     // 1. Vendor Login
 echo "1. Vendor Login...\n";
@@ -160,6 +163,9 @@ assert($foundInLedger, "Claimed order must appear in today's audit ledger");
         $pdo->exec("DELETE FROM payments WHERE order_id = $testOrderId");
         $pdo->exec("DELETE FROM order_items WHERE order_id = $testOrderId");
         $pdo->exec("DELETE FROM orders WHERE id = $testOrderId");
+    }
+    if (isset($pdo) && !empty($origClosing)) {
+        $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
     }
     if (file_exists($cookieFileVendor)) @unlink($cookieFileVendor);
     if (file_exists($cookieFileStudent)) @unlink($cookieFileStudent);

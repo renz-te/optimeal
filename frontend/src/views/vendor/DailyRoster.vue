@@ -483,7 +483,7 @@
                 </div>
                 <div class="text-amber-200/90 text-[11px] space-y-0.5">
                   <div v-for="dIng in dominantIngredients" :key="dIng.name">
-                    <strong>{{ dIng.name || 'Ingredient' }}</strong> represents {{ Math.round(((dIng.item_cost || 0) / (recipeForm.total_batch_cost || 1)) * 100) }}% of total batch cost (exceeds 40% threshold).
+                    {{ dIng.name || 'Ingredient' }} is {{ Math.round(((dIng.item_cost || 0) / (recipeForm.total_batch_cost || 1)) * 100) }}% of batch cost. Check the quantity.
                   </div>
                 </div>
               </div>
@@ -516,7 +516,7 @@
 
             <div v-if="recipeForm.has_unmapped" class="mt-3 pt-2.5 border-t border-amber-200/60 flex items-center gap-2 text-xs font-semibold text-amber-800">
               <AlertTriangle :size="14" class="text-amber-600 shrink-0" />
-              <span>Some ingredients are unmapped in the admin taxonomy and won't trigger allergen alerts.</span>
+              <span>Some ingredients are not in the allergen list. Students with allergies will be asked to review them before ordering.</span>
             </div>
           </div>
 
@@ -567,32 +567,23 @@
                   </button>
                 </div>
 
-                <!-- Unit Cost Input & Portioned Food Cost -->
+                <!-- Catalog Price & Portioned Food Cost -->
                 <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-200/60 text-xs">
-                  <div class="flex items-center gap-1.5">
-                    <span class="text-slate-400 font-bold">Cost:</span>
-                    <span class="text-slate-500 font-semibold">₱</span>
-                    <input 
-                      type="number" 
-                      step="0.5" 
-                      min="0" 
-                      v-model.number="ing.unit_cost" 
-                      @input="calculateFoodCost"
-                      placeholder="0.00" 
-                      class="w-20 px-2 py-1 border border-slate-300 rounded text-xs font-bold outline-none focus:border-emerald-500 bg-white text-slate-800"
-                    />
-                    <span class="text-slate-400">per</span>
-                    <select 
-                      v-model="ing.cost_unit" 
-                      @change="calculateFoodCost"
-                      class="px-2 py-1 border border-slate-300 rounded text-xs font-medium bg-white outline-none focus:border-emerald-500"
+                  <div class="flex items-center gap-2">
+                    <span class="text-slate-400 font-bold">Catalog Price:</span>
+                    <span v-if="(ing.unit_cost || 0) > 0" class="font-semibold text-slate-800">
+                      ₱{{ Number(ing.unit_cost || 0).toFixed(2) }} / {{ ing.cost_unit || 'kg' }}
+                    </span>
+                    <span v-else class="text-amber-600 font-medium italic">
+                      No price set
+                    </span>
+                    <router-link 
+                      to="/vendor/prices" 
+                      target="_blank" 
+                      class="text-emerald-600 hover:text-emerald-700 underline font-semibold ml-1.5 inline-flex items-center gap-0.5"
                     >
-                      <option value="kg">kg</option>
-                      <option value="g">g</option>
-                      <option value="l">l</option>
-                      <option value="ml">ml</option>
-                      <option value="pc">pc</option>
-                    </select>
+                      Edit Price
+                    </router-link>
                   </div>
                   <div class="text-right">
                     <span class="text-slate-400 text-[11px] mr-1">Portion Cost:</span>
@@ -1164,6 +1155,18 @@ const calculateFoodCost = () => {
   recipeForm.suggested_price_floor = Math.min(basePrice, rawFloor)
 }
 
+const vendorPriceCatalog = ref([])
+const fetchVendorPrices = async () => {
+  try {
+    const res = await fetch('/api/vendor/ingredient-costs')
+    if (res.ok) {
+      vendorPriceCatalog.value = await res.json()
+    }
+  } catch (err) {
+    console.error('Failed to load ingredient price catalog', err)
+  }
+}
+
 const openRecipeModal = async (item) => {
   recipeDish.value = item
   recipeForm.yield_servings = 10
@@ -1178,6 +1181,7 @@ const openRecipeModal = async (item) => {
   showRecipeModal.value = true
 
   try {
+    await fetchVendorPrices()
     const res = await fetch(`/api/vendor/dish/recipe?menu_item_id=${item.id}`)
     if (res.ok) {
       const data = await res.json()
@@ -1251,6 +1255,17 @@ const updateAllergenPreview = () => {
 
 const onIngredientNameChange = () => {
   updateAllergenPreview()
+  // Match newly typed ingredient against catalog prices
+  recipeForm.ingredients.forEach(ing => {
+    const name = (ing.name || '').trim().toLowerCase()
+    if (name && vendorPriceCatalog.value.length > 0) {
+      const match = vendorPriceCatalog.value.find(p => (p.ingredient_name || '').trim().toLowerCase() === name)
+      if (match) {
+        ing.unit_cost = Number(match.cost) || 0
+        ing.cost_unit = match.cost_unit || ing.cost_unit || 'kg'
+      }
+    }
+  })
   calculateFoodCost()
 }
 
@@ -1282,15 +1297,18 @@ const suggestRecipe = async () => {
     const suggestion = data.data
     recipeForm.yield_servings = suggestion.yield_servings || 10
     recipeForm.instructions = suggestion.instructions || recipeForm.instructions
-    recipeForm.ingredients = (suggestion.ingredients || []).map(i => ({
-      name: i.name,
-      quantity: i.quantity,
-      unit: i.unit || 'g',
-      unit_cost: 0,
-      cost_unit: ['g', 'kg'].includes((i.unit || '').toLowerCase()) ? 'kg' : (['ml', 'l'].includes((i.unit || '').toLowerCase()) ? 'l' : i.unit),
-      item_cost: 0,
-      is_unmapped: false
-    }))
+    recipeForm.ingredients = (suggestion.ingredients || []).map(i => {
+      const match = (vendorPriceCatalog.value || []).find(p => (p.ingredient_name || '').trim().toLowerCase() === (i.name || '').trim().toLowerCase())
+      return {
+        name: i.name,
+        quantity: i.quantity,
+        unit: i.unit || 'g',
+        unit_cost: match ? Number(match.cost) : 0,
+        cost_unit: match ? match.cost_unit : (['g', 'kg'].includes((i.unit || '').toLowerCase()) ? 'kg' : (['ml', 'l'].includes((i.unit || '').toLowerCase()) ? 'l' : i.unit)),
+        item_cost: 0,
+        is_unmapped: false
+      }
+    })
     updateAllergenPreview()
     calculateFoodCost()
     showToast('Recipe suggested by AI! Review ingredients and costs.', 'success')
@@ -1366,23 +1384,7 @@ const saveRecipe = async () => {
       return
     }
 
-    // Also sync ingredient costs
-    const costItems = recipeForm.ingredients
-      .filter(i => (i.unit_cost || 0) > 0 && i.name)
-      .map(i => ({
-        ingredient_name: i.name,
-        cost: i.unit_cost,
-        cost_unit: i.cost_unit || 'kg'
-      }))
-    if (costItems.length > 0) {
-      await fetch('/api/vendor/ingredient-costs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: costItems })
-      })
-    }
-
-    showToast('Recipe & ingredient costs saved successfully!', 'success')
+    showToast('Recipe saved successfully!', 'success')
     recipeForm.allergens = data.allergens_preview || []
     recipeForm.has_unmapped = data.has_unmapped || false
     closeRecipeModal()

@@ -133,7 +133,8 @@ try {
     ")->execute([$dishId, $sellByStr, $sellByStr]);
 
     // Ensure cafeteria is open
-    $pdo->query("UPDATE settings SET closing_time = '20:00', opening_time = '06:00' WHERE id = 1");
+    $origClosing = $pdo->query("SELECT closing_time FROM settings WHERE id = 1")->fetchColumn();
+    $pdo->query("UPDATE settings SET closing_time = '23:59', opening_time = '06:00' WHERE id = 1");
 
     // Create a dine_in order
     $orderRes = apiReq("$baseUrl/reservations", 'POST', [
@@ -259,6 +260,9 @@ try {
         $pdo->exec("DELETE FROM inventory WHERE menu_item_id IN ($inD)");
         $pdo->exec("DELETE FROM menu_items WHERE id IN ($inD)");
         echo "✓ Cleaned test dishes\n";
+    }
+    if (!empty($origClosing)) {
+        $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
     }
     if (file_exists($cookieVendor)) @unlink($cookieVendor);
     if (file_exists($cookieStudent)) @unlink($cookieStudent);

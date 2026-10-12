@@ -52,6 +52,10 @@ Migrations must be executed sequentially against the `optimeal` database. Each m
    - **Adds**: Column `ingredients_text` (TEXT NULL) to `menu_items` for dish-form raw ingredient retention.
    - **Re-run Safety**: Safe to re-run. Employs dynamic SQL querying `INFORMATION_SCHEMA.COLUMNS` to conditionally apply `ALTER TABLE` only when missing.
 
+10. `database/migrate_d9.sql`
+   - **Adds**: Table `ingredient_price_history` with columns `id`, `store_id`, `ingredient_name`, `old_cost`, `new_cost`, `cost_unit`, `action` (`ENUM('manual','bulk','rollback')`), `batch_id`, `is_rolled_back`, and `created_at`.
+   - **Re-run Safety**: Safe to re-run. Uses `CREATE TABLE IF NOT EXISTS`.
+
 ### Environment Configuration
 The backend loads configuration from `api/.env`. Note that `.env.example` does not exist in the repository; the configuration file must be created manually or configured directly in `api/.env` with the following keys:
 
@@ -105,6 +109,11 @@ The backend loads configuration from `api/.env`. Note that `.env.example` does n
 - **Error Shielding**: Intentional business validation errors throw `BusinessException` (emitting HTTP 400/422). Database exceptions and internal runtime errors are caught, logged to PHP `error_log`, and shielded behind generic HTTP 500 JSON responses.
 - **Authentication Hardening**: Session IDs are regenerated upon login via `session_regenerate_id(true)`. CLI background scripts enforce `php_sapi_name() === 'cli'`.
 
+### Dish Photos, Kitchen Prep Scaling & Ingredient Price Catalog (Phase D9)
+- **Dish Photos (Phase D9.1)**: Secure uploads to `uploads/dishes/` verified with both `finfo` MIME validation and `getimagesize`. Maximum file size is 2MB, files are renamed to random 32-character hex filenames, and script execution is blocked via `uploads/dishes/.htaccess`. Old images are purged upon replacement or dish deletion with strict path traversal prevention. Frontend renders lazy-loaded images with blur placeholders and category fallbacks.
+- **Reservations in Lineup (Phase D9.2)**: The daily lineup dynamically computes `reserved_qty` for today's orders with `reserved` and `paid` statuses, grouped chronologically by pickup slot (defaulting to `"Dine-In/Walk-in"`). In the kitchen prep plan, `cook_servings = max(planned_servings, reserved_qty)` dynamically scales ingredient amounts without altering checkout quotas or reservation limits. Displays verbatim warning: `"Reservations exceed plan: cooking X servings"`.
+- **Ingredient Price Catalog & Polish (Phase D9.3)**: Raw ingredient costs are decoupled from the recipe editor into a dedicated catalog (`/vendor/prices`). Recipes strictly query catalog costs. Manual edits log `manual` history, and bulk percentage adjustments simulate previews without database mutations. Bulk adjustments generate unique batch IDs and log `bulk` history. Rollbacks restore previous costs, log `rollback`, and enforce double-rollback defense with HTTP 422 (`"This change has already been rolled back."`). Price adjustments calculate suggested price floors (`min(base_price, cost * 1.2)`) and return affected dishes, but never mutate active dish price floors automatically. Verbatim notices: allergen warning `"Some ingredients are not in the allergen list. Students with allergies will be asked to review them before ordering."` and cost concentration note `"<Ingredient Name> is <X>% of batch cost. Check the quantity."`.
+
 ---
 
 ## AI-Assisted Menu Enrichment & Safety Sandbox
@@ -137,6 +146,7 @@ To avoid allergen hallucinations:
 5. **Midnight-Crossing Operating Hours**: Cafeteria hours that span across midnight (e.g., opening at 08:00 and closing at 02:00) are unsupported and return zero pickup slots.
 6. **Gemini Free-Tier Rate Limits**: The Gemini free-tier quota is limited to approximately 15 requests per minute and 1,500 requests per day. Exhaustion triggers the manual fallback workflow.
 7. **Sanitary and Reheat Compliance**: Food holding temperature and sanitary compliance are physical operations handled outside the software; the application only enforces timestamp expiration (`sell_by`).
+8. **COGS Dynamic Catalog Valuation**: Cost of Goods Sold (COGS) in the Daily Audit ledger and recipe costing calculations evaluate against current vendor catalog prices (`vendor_ingredient_costs`), rather than immutable historical pricing snapshots at the exact moment of order placement. Historical price changes are logged in `ingredient_price_history`, but order records do not store point-in-time ingredient unit cost snapshots.
 
 ---
 
@@ -155,6 +165,9 @@ Verification test scripts are located in the `tests/` directory.
 - `tests/test_d8_1.php`: Single source of truth ingredient-allergen link synchronization, unmapped ingredient checkout safety block, override persistence, and safe customer checkout.
 - `tests/test_d8_2.php`: 1.2x cost multiplier floor bounding, floor boundary validation (HTTP 422), decay tier discount validation, closed menu state, and single-store settings isolation.
 - `tests/test_d8_3.php`: Backend hygiene: cron CLI guard, session regeneration, exception shielding with BusinessException, fulfillment re-validation against sell-by, cancellation claims restoration, and test cleanup in finally.
+- `tests/test_d9.php`: Dish photo upload dual-validation (finfo + getimagesize), 2MB cap, random hex filenames, .htaccess block, and deletion cleanup.
+- `tests/test_d9_reservations.php`: Today's reserved/paid order counting, pickup slot chronological grouping, cook_servings prep scaling, and verbatim warning banner checks.
+- `tests/test_d9_catalog.php`: Price catalog manual save, bulk adjust preview and apply, history listing, rollback, double-rollback defense (HTTP 422), and price floor sovereignty.
 
 ### How to Run Tests
 Execute each test from the command line interface:
@@ -169,11 +182,14 @@ php tests/test_d7.php
 php tests/test_d8_1.php
 php tests/test_d8_2.php
 php tests/test_d8_3.php
+php tests/test_d9.php
+php tests/test_d9_reservations.php
+php tests/test_d9_catalog.php
 ```
 
 ### Test Prerequisites
 1. Laragon running Apache and MySQL with the `optimeal` database configured.
-2. All migrations applied in order (`schema.sql` through `migrate_d8.sql`).
+2. All migrations applied in order (`schema.sql` through `migrate_d9.sql`).
 3. Demo user accounts present:
    - Vendor: `canteen@optimeal.test` / `password123`
    - Student: `student@optimeal.test` / `password123`

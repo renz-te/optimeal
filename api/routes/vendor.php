@@ -1409,6 +1409,84 @@ function calculateIngredientItemCost($recipeQty, $recipeUnit, $cost, $costUnit) 
     return ['cost' => null, 'reason' => "Incompatible units ({$recipeUnit} vs {$costUnit})"];
 }
 
+function getAffectedDishesWithSuggestedFloor($pdo, $store_id, array $ingredientNames) {
+    if (empty($ingredientNames)) return [];
+
+    $placeholders = implode(',', array_fill(0, count($ingredientNames), '?'));
+    $params = array_merge([$store_id], array_map('strtolower', array_map('trim', $ingredientNames)));
+
+    $sql = "
+        SELECT DISTINCT m.id, m.name, m.base_price, m.price_floor, r.id as recipe_id, r.yield_servings
+        FROM menu_items m
+        JOIN recipes r ON m.id = r.menu_item_id
+        JOIN recipe_ingredients ri ON r.id = ri.recipe_id
+        WHERE m.store_id = ?
+          AND LOWER(TRIM(ri.ingredient_name)) IN ($placeholders)
+        ORDER BY m.name ASC
+    ";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $dishes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Load store's latest ingredient costs
+    $stmtCosts = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ?");
+    $stmtCosts->execute([$store_id]);
+    $allCosts = $stmtCosts->fetchAll(PDO::FETCH_ASSOC);
+
+    $costMapById = [];
+    $costMapByName = [];
+    foreach ($allCosts as $c) {
+        if (!empty($c['ingredient_id'])) {
+            $costMapById[(int)$c['ingredient_id']] = $c;
+        }
+        $costMapByName[strtolower(trim($c['ingredient_name']))] = $c;
+    }
+
+    $affected = [];
+    foreach ($dishes as $d) {
+        $stmtIngs = $pdo->prepare("SELECT * FROM recipe_ingredients WHERE recipe_id = ?");
+        $stmtIngs->execute([(int)$d['recipe_id']]);
+        $recipeIngredients = $stmtIngs->fetchAll(PDO::FETCH_ASSOC);
+
+        $totalBatchCost = 0.0;
+        foreach ($recipeIngredients as $ri) {
+            $matchedCost = null;
+            if (!empty($ri['ingredient_id']) && isset($costMapById[(int)$ri['ingredient_id']])) {
+                $matchedCost = $costMapById[(int)$ri['ingredient_id']];
+            } else {
+                $clean = strtolower(trim($ri['ingredient_name']));
+                if (isset($costMapByName[$clean])) {
+                    $matchedCost = $costMapByName[$clean];
+                }
+            }
+            if ($matchedCost) {
+                $costRes = calculateIngredientItemCost((float)$ri['quantity'], $ri['unit'], (float)$matchedCost['cost'], $matchedCost['cost_unit']);
+                if ($costRes['cost'] !== null) {
+                    $totalBatchCost += $costRes['cost'];
+                }
+            }
+        }
+
+        $yield = max(1, (int)$d['yield_servings']);
+        $costPerServing = $totalBatchCost / $yield;
+        $multiplier = defined('FLOOR_COST_MULTIPLIER') ? FLOOR_COST_MULTIPLIER : 1.2;
+        $rawFloor = round($costPerServing * $multiplier, 2);
+        $basePrice = (float)$d['base_price'];
+        $suggestedFloor = min($basePrice, $rawFloor);
+
+        $affected[] = [
+            'menu_item_id' => (int)$d['id'],
+            'name' => $d['name'],
+            'base_price' => $basePrice,
+            'current_price_floor' => (float)$d['price_floor'],
+            'cost_per_serving' => round($costPerServing, 2),
+            'suggested_price_floor' => $suggestedFloor
+        ];
+    }
+
+    return $affected;
+}
+
 function handleGetIngredientCosts($pdo) {
     $store_id = requireVendor($pdo);
     $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? ORDER BY ingredient_name ASC");
@@ -1432,6 +1510,7 @@ function handleSaveIngredientCosts($pdo) {
     }
 
     $findTaxStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+    $findExistingStmt = $pdo->prepare("SELECT cost, cost_unit FROM vendor_ingredient_costs WHERE store_id = ? AND LOWER(ingredient_name) = LOWER(?) LIMIT 1");
     $upsertStmt = $pdo->prepare("
         INSERT INTO vendor_ingredient_costs (store_id, ingredient_id, ingredient_name, cost, cost_unit)
         VALUES (?, ?, ?, ?, ?)
@@ -1441,8 +1520,14 @@ function handleSaveIngredientCosts($pdo) {
             cost_unit = VALUES(cost_unit),
             updated_at = CURRENT_TIMESTAMP
     ");
+    $historyStmt = $pdo->prepare("
+        INSERT INTO ingredient_price_history (store_id, ingredient_name, old_cost, new_cost, cost_unit, action, batch_id)
+        VALUES (?, ?, ?, ?, ?, 'manual', NULL)
+    ");
 
     $saved = [];
+    $changedNames = [];
+
     foreach ($items as $item) {
         $name = trim($item['ingredient_name'] ?? $item['name'] ?? '');
         if ($name === '') continue;
@@ -1452,7 +1537,19 @@ function handleSaveIngredientCosts($pdo) {
         $findTaxStmt->execute([$name]);
         $ingId = $findTaxStmt->fetchColumn() ?: null;
 
+        $findExistingStmt->execute([$store_id, $name]);
+        $existing = $findExistingStmt->fetch(PDO::FETCH_ASSOC);
+
+        $oldCost = $existing ? (float)$existing['cost'] : 0.00;
+
         $upsertStmt->execute([$store_id, $ingId, $name, $cost, $unit]);
+
+        // Log manual history if price changed or first time creation
+        if (!$existing || abs($oldCost - $cost) > 0.001) {
+            $historyStmt->execute([$store_id, $name, $oldCost, $cost, $unit]);
+            $changedNames[] = $name;
+        }
+
         $saved[] = [
             'store_id' => $store_id,
             'ingredient_id' => $ingId,
@@ -1462,7 +1559,198 @@ function handleSaveIngredientCosts($pdo) {
         ];
     }
 
-    jsonResponse(['message' => 'Ingredient costs saved', 'count' => count($saved), 'saved' => $saved]);
+    $affectedDishes = getAffectedDishesWithSuggestedFloor($pdo, $store_id, $changedNames);
+
+    jsonResponse([
+        'message' => 'Ingredient costs saved',
+        'count' => count($saved),
+        'saved' => $saved,
+        'affected_dishes' => $affectedDishes
+    ]);
+}
+
+function handleBulkPreviewIngredientCosts($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (!isset($input['percent']) && !isset($input['percentage'])) {
+        jsonResponse(['error' => 'Percentage adjustment is required'], 422);
+    }
+    $percent = (float)($input['percent'] ?? $input['percentage']);
+
+    $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? ORDER BY ingredient_name ASC");
+    $stmt->execute([$store_id]);
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $preview = [];
+    foreach ($items as $it) {
+        $oldCost = (float)$it['cost'];
+        $newCost = max(0, round($oldCost * (1 + $percent / 100), 2));
+        $preview[] = [
+            'id' => (int)$it['id'],
+            'ingredient_name' => $it['ingredient_name'],
+            'old_cost' => $oldCost,
+            'current_cost' => $oldCost,
+            'new_cost' => $newCost,
+            'diff' => round($newCost - $oldCost, 2),
+            'cost_unit' => $it['cost_unit']
+        ];
+    }
+
+    jsonResponse([
+        'percent' => $percent,
+        'count' => count($preview),
+        'items' => $preview,
+        'preview' => $preview
+    ]);
+}
+
+function handleBulkApplyIngredientCosts($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    if (!isset($input['percent']) && !isset($input['percentage'])) {
+        jsonResponse(['error' => 'Percentage adjustment is required'], 422);
+    }
+    $percent = (float)($input['percent'] ?? $input['percentage']);
+
+    $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ?");
+    $stmt->execute([$store_id]);
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (empty($items)) {
+        jsonResponse(['error' => 'No ingredients found in catalog to adjust.'], 400);
+    }
+
+    $batchId = 'batch_' . bin2hex(random_bytes(8));
+    $updateStmt = $pdo->prepare("UPDATE vendor_ingredient_costs SET cost = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+    $historyStmt = $pdo->prepare("
+        INSERT INTO ingredient_price_history (store_id, ingredient_name, old_cost, new_cost, cost_unit, action, batch_id)
+        VALUES (?, ?, ?, ?, ?, 'bulk', ?)
+    ");
+
+    $pdo->beginTransaction();
+    try {
+        $updated = [];
+        $changedNames = [];
+        foreach ($items as $it) {
+            $oldCost = (float)$it['cost'];
+            $newCost = max(0, round($oldCost * (1 + $percent / 100), 2));
+            $updateStmt->execute([$newCost, (int)$it['id']]);
+            $historyStmt->execute([$store_id, $it['ingredient_name'], $oldCost, $newCost, $it['cost_unit'], $batchId]);
+
+            $updated[] = [
+                'ingredient_name' => $it['ingredient_name'],
+                'old_cost' => $oldCost,
+                'new_cost' => $newCost,
+                'cost_unit' => $it['cost_unit']
+            ];
+            $changedNames[] = $it['ingredient_name'];
+        }
+        $pdo->commit();
+
+        $affectedDishes = getAffectedDishesWithSuggestedFloor($pdo, $store_id, $changedNames);
+
+        jsonResponse([
+            'message' => "Bulk price adjustment of {$percent}% applied successfully",
+            'batch_id' => $batchId,
+            'count' => count($updated),
+            'updated' => $updated,
+            'affected_dishes' => $affectedDishes
+        ]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Bulk price apply error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to apply bulk price adjustment due to an internal server error.'], 500);
+    }
+}
+
+function handleGetIngredientPriceHistory($pdo) {
+    $store_id = requireVendor($pdo);
+    $stmt = $pdo->prepare("
+        SELECT id, store_id, ingredient_name, old_cost, new_cost, cost_unit, action, batch_id, is_rolled_back, created_at
+        FROM ingredient_price_history
+        WHERE store_id = ?
+        ORDER BY id DESC
+        LIMIT 200
+    ");
+    $stmt->execute([$store_id]);
+    $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    jsonResponse($history);
+}
+
+function handleRollbackIngredientCosts($pdo) {
+    $store_id = requireVendor($pdo);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    $batchId = trim($input['batch_id'] ?? '');
+    $historyId = (int)($input['history_id'] ?? 0);
+
+    if (empty($batchId) && $historyId <= 0) {
+        jsonResponse(['error' => 'batch_id or history_id is required for rollback'], 422);
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $records = [];
+        if (!empty($batchId)) {
+            $stmt = $pdo->prepare("SELECT * FROM ingredient_price_history WHERE store_id = ? AND batch_id = ? AND action = 'bulk'");
+            $stmt->execute([$store_id, $batchId]);
+            $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $stmt = $pdo->prepare("SELECT * FROM ingredient_price_history WHERE store_id = ? AND id = ?");
+            $stmt->execute([$store_id, $historyId]);
+            $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        if (empty($records)) {
+            $pdo->rollBack();
+            jsonResponse(['error' => 'Price history record not found'], 404);
+        }
+
+        // Double-rollback defense: reject if already rolled back
+        foreach ($records as $r) {
+            if ((int)$r['is_rolled_back'] === 1) {
+                $pdo->rollBack();
+                jsonResponse(['error' => 'This change has already been rolled back.'], 422);
+            }
+        }
+
+        $rollbackBatchId = 'rollback_' . bin2hex(random_bytes(8));
+        $updateCostStmt = $pdo->prepare("UPDATE vendor_ingredient_costs SET cost = ?, updated_at = CURRENT_TIMESTAMP WHERE store_id = ? AND LOWER(ingredient_name) = LOWER(?)");
+        $markRolledBackStmt = $pdo->prepare("UPDATE ingredient_price_history SET is_rolled_back = 1 WHERE id = ?");
+        $logRollbackStmt = $pdo->prepare("
+            INSERT INTO ingredient_price_history (store_id, ingredient_name, old_cost, new_cost, cost_unit, action, batch_id, is_rolled_back)
+            VALUES (?, ?, ?, ?, ?, 'rollback', ?, 0)
+        ");
+
+        $changedNames = [];
+        foreach ($records as $r) {
+            $revertCost = (float)$r['old_cost'];
+            $currentCost = (float)$r['new_cost'];
+
+            $updateCostStmt->execute([$revertCost, $store_id, $r['ingredient_name']]);
+            $markRolledBackStmt->execute([(int)$r['id']]);
+            $logRollbackStmt->execute([$store_id, $r['ingredient_name'], $currentCost, $revertCost, $r['cost_unit'], $rollbackBatchId]);
+
+            $changedNames[] = $r['ingredient_name'];
+        }
+
+        $pdo->commit();
+
+        $affectedDishes = getAffectedDishesWithSuggestedFloor($pdo, $store_id, $changedNames);
+
+        jsonResponse([
+            'message' => 'Rollback completed successfully',
+            'rolled_back_count' => count($records),
+            'rollback_batch_id' => $rollbackBatchId,
+            'affected_dishes' => $affectedDishes
+        ]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Rollback error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to rollback price changes due to an internal server error.'], 500);
+    }
 }
 
 function handleApplyPriceFloor($pdo) {

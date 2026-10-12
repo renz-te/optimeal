@@ -27,6 +27,9 @@
           <router-link to="/vendor/roster" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <Utensils :size="18" /><span>Master Catalog & Lineup</span>
           </router-link>
+          <router-link to="/vendor/prices" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
+            <Coins :size="18" /><span>Ingredient Price Catalog</span>
+          </router-link>
           <router-link to="/vendor/decay" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <Tags :size="18" /><span>Surplus Decay Rules</span>
           </router-link>
@@ -61,7 +64,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { LayoutDashboard, Store, Tags, ListTree, Users, ListOrdered, Utensils, LineChart, LogOut } from 'lucide-vue-next'
+import { LayoutDashboard, Store, Tags, ListTree, Users, ListOrdered, Utensils, Coins, LineChart, LogOut } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
 import AdminSimulationBar from '../components/AdminSimulationBar.vue'
 

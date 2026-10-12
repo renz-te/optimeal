@@ -68,6 +68,9 @@ echo "✓ 1. Vendor Authenticated (Store 1)\n";
 
 $orderId = null;
 $dishId = null;
+$origClosing = $pdo->query("SELECT closing_time FROM settings WHERE id = 1")->fetchColumn();
+$pdo->query("UPDATE settings SET closing_time = '23:59' WHERE id = 1");
+
 try {
     $studentLogin = apiRequest("$baseUrl/auth/login", 'POST', [
     'email' => 'student@optimeal.test',
@@ -123,9 +126,9 @@ echo "✓ GET /api/customer/pickup-slots responded HTTP 200. Closing: {$slotEndp
 
 // 4. Student Checkout Validation: Missing & Invalid Pickup Slots
 echo "\n--- TEST STEP 3: Student Take-Out Checkout Validation ---\n";
-// Ensure test dish has stock and future sell-by
-$dishStmt = $pdo->query("SELECT id FROM menu_items WHERE store_id = 1 AND is_active = 1 LIMIT 1");
+$dishStmt = $pdo->query("SELECT id FROM menu_items WHERE store_id = 1 LIMIT 1");
 $dishId = (int)$dishStmt->fetchColumn();
+$pdo->prepare("UPDATE menu_items SET is_active = 1 WHERE id = ?")->execute([$dishId]);
 $pdo->prepare("UPDATE inventory SET online_pool_qty = 20, sell_by = DATE_ADD(NOW(), INTERVAL 4 HOUR), cooked_at = NOW(), delisted_from_app = 0 WHERE menu_item_id = ?")->execute([$dishId]);
 $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
 
@@ -265,6 +268,9 @@ if ($directWebRes['status'] === 403 || $directWebRes['status'] === 404) {
         }
         if (!empty($dishId)) {
             $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
+        }
+        if (!empty($origClosing)) {
+            $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
         }
     }
     if (file_exists($cookieVendor)) @unlink($cookieVendor);

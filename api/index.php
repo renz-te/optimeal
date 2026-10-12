@@ -159,6 +159,18 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/ingredient-costs' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSaveIngredientCosts($pdo);
+} elseif ($route === '/vendor/ingredient-costs/bulk-preview' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleBulkPreviewIngredientCosts($pdo);
+} elseif ($route === '/vendor/ingredient-costs/bulk-apply' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleBulkApplyIngredientCosts($pdo);
+} elseif ($route === '/vendor/ingredient-costs/history' && $method === 'GET') {
+    require 'routes/vendor.php';
+    handleGetIngredientPriceHistory($pdo);
+} elseif ($route === '/vendor/ingredient-costs/rollback' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleRollbackIngredientCosts($pdo);
 } elseif ($route === '/vendor/dish/recipe/suggest' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSuggestRecipe($pdo);

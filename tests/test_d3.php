@@ -64,6 +64,9 @@ echo "✓ 1. Vendor Authenticated (Store 1)\n";
 
 $dishAId = null;
 $dishBId = null;
+$origClosing = $pdo->query("SELECT closing_time FROM settings WHERE id = 1")->fetchColumn();
+$pdo->query("UPDATE settings SET closing_time = '23:59' WHERE id = 1");
+
 try {
     // 2. Authenticate Student (student@optimeal.test)
 $studentLogin = apiRequest("$baseUrl/auth/login", 'POST', [
@@ -341,6 +344,9 @@ if ($webTest['status'] === 403) {
             $pdo->exec("DELETE FROM orders WHERE id NOT IN (SELECT DISTINCT order_id FROM order_items)");
             $pdo->exec("DELETE FROM inventory WHERE menu_item_id IN ($inD)");
             $pdo->exec("DELETE FROM menu_items WHERE id IN ($inD)");
+        }
+        if (!empty($origClosing)) {
+            $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
         }
     }
     if (file_exists($cookieVendor)) @unlink($cookieVendor);
