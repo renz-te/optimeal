@@ -316,23 +316,27 @@
             />
           </div>
 
-          <!-- Closing Time -->
+          <!-- Closing Time (Read-Only) -->
           <div class="bg-slate-50/60 p-5 rounded-xl border border-slate-200">
             <label class="block text-sm font-bold text-slate-800 mb-1 flex items-center justify-between">
               <span>Daily Closing Time</span>
               <Clock :size="16" class="text-slate-400" />
             </label>
             <p class="text-xs text-slate-500 mb-3">
-              Time service closes and active reservations expire for the day.
+              Fixed cafeteria closing schedule (managed via system operations; read-only).
             </p>
             <input
               id="setting-closing-time"
               v-model="settingsForm.closing_time"
               type="text"
-              required
+              readonly
+              disabled
               placeholder="20:00"
-              class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold text-slate-800 bg-white font-mono"
+              class="w-full px-4 py-2.5 rounded-lg border border-slate-300 outline-none text-base font-bold text-slate-500 bg-slate-100 font-mono cursor-not-allowed"
             />
+            <p class="text-[11px] text-amber-700 font-medium mt-2">
+              Note: Closing time is fixed by university policy and cannot be altered from this panel.
+            </p>
           </div>
 
           <!-- Max Discount Quantity -->
@@ -349,27 +353,6 @@
               type="number"
               min="1"
               max="50"
-              required
-              class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold text-slate-800 bg-white"
-            />
-          </div>
-
-          <!-- Default Decay Rate -->
-          <div class="bg-slate-50/60 p-5 rounded-xl border border-slate-200">
-            <label class="block text-sm font-bold text-slate-800 mb-1 flex items-center justify-between">
-              <span>Default Dynamic Decay Rate</span>
-              <span class="text-xs font-semibold text-slate-600">% / hr</span>
-            </label>
-            <p class="text-xs text-slate-500 mb-3">
-              Baseline hourly price decay rate applied to surplus food items approaching closing.
-            </p>
-            <input
-              id="setting-decay-rate"
-              v-model.number="settingsForm.default_decay_rate"
-              type="number"
-              step="0.5"
-              min="0"
-              max="100"
               required
               class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold text-slate-800 bg-white"
             />
@@ -432,7 +415,6 @@ const settingsForm = reactive({
   opening_time: '07:00',
   closing_time: '20:00',
   max_discount_qty: 5,
-  default_decay_rate: 10.00,
   ai_enabled: true,
   updated_at: ''
 })
@@ -535,9 +517,7 @@ const handleSaveSettings = async () => {
       body: JSON.stringify({
         reservation_ttl: settingsForm.reservation_ttl,
         opening_time: settingsForm.opening_time,
-        closing_time: settingsForm.closing_time,
         max_discount_qty: settingsForm.max_discount_qty,
-        default_decay_rate: settingsForm.default_decay_rate,
         ai_enabled: settingsForm.ai_enabled
       })
     })

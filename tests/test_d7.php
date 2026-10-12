@@ -246,7 +246,8 @@ try {
     $menuRes = d7ApiRequest("$baseUrl/menu?store_id=1");
     $targetDish = null;
     if ($menuRes['status'] === 200 && is_array($menuRes['data'])) {
-        foreach ($menuRes['data'] as $item) {
+        $dishList = isset($menuRes['data']['items']) ? $menuRes['data']['items'] : $menuRes['data'];
+        foreach ($dishList as $item) {
             if ($item['id'] === $testDishId) {
                 $targetDish = $item;
                 break;

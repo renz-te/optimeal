@@ -346,11 +346,11 @@
               <div class="flex items-center gap-2">
                 <BarChart3 class="w-4 h-4 text-indigo-400 inline" />
                 <h4 class="text-xs font-black uppercase tracking-wider text-slate-200">
-                  Food Cost & Margin Engine (2.5x Markup)
+                  Food Cost & Price Floor Engine (1.2x Floor)
                 </h4>
               </div>
               <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Target 40% Food Cost
+                1.2x Cost Protection
               </span>
             </div>
 
@@ -368,16 +368,19 @@
               </div>
 
               <div class="bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/30">
-                <div class="text-[10px] font-bold text-emerald-400 uppercase">Suggested floor (cost x 2.5)</div>
+                <div class="text-[10px] font-bold text-emerald-400 uppercase">Suggested floor (cost x 1.2)</div>
                 <div class="text-xl font-black text-emerald-400 mt-0.5">₱{{ (recipeForm.suggested_price_floor || 0).toFixed(2) }}</div>
-                <div class="text-[10px] text-emerald-300/80 mt-0.5">Cost × 2.5</div>
+                <div class="text-[10px] text-emerald-300/80 mt-0.5">Cost × 1.2 (Capped at Base)</div>
               </div>
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-700/80 text-xs">
-              <div class="text-slate-300">
-                Current Floor: <span class="font-bold text-white">₱{{ recipeDish?.price_floor || recipeDish?.base_price || 0 }}</span>
-                <span class="text-slate-400 text-[11px] ml-1.5">(Base: ₱{{ recipeDish?.base_price || 0 }})</span>
+              <div class="text-slate-300 flex items-center gap-2 flex-wrap">
+                <span>Current Floor: <span class="font-bold text-white">₱{{ recipeDish?.price_floor || recipeDish?.base_price || 0 }}</span></span>
+                <span class="text-slate-400 text-[11px]">(Base: ₱{{ recipeDish?.base_price || 0 }})</span>
+                <span v-if="maxDiscountPercent > 0" class="px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 text-[11px] font-bold border border-amber-400/30">
+                  Max Discount: {{ maxDiscountPercent }}%
+                </span>
               </div>
 
               <button 
@@ -387,6 +390,21 @@
               >
                 <span>Apply Suggested Floor (₱{{ (recipeForm.suggested_price_floor || 0).toFixed(2) }})</span>
               </button>
+            </div>
+
+            <!-- Single Ingredient Cost > 40% Warning Banner -->
+            <div v-if="dominantIngredients.length > 0" class="mt-3 pt-2.5 border-t border-slate-700/80">
+              <div class="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-lg text-xs space-y-1">
+                <div class="flex items-center gap-1.5 text-amber-300 font-bold">
+                  <AlertTriangle :size="14" class="text-amber-400 shrink-0" />
+                  <span>Cost Concentration Warning:</span>
+                </div>
+                <div class="text-amber-200/90 text-[11px] space-y-0.5">
+                  <div v-for="dIng in dominantIngredients" :key="dIng.name">
+                    <strong>{{ dIng.name || 'Ingredient' }}</strong> represents {{ Math.round(((dIng.item_cost || 0) / (recipeForm.total_batch_cost || 1)) * 100) }}% of total batch cost (exceeds 40% threshold).
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -648,7 +666,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, watch } from 'vue'
+import { ref, onMounted, reactive, watch, computed } from 'vue'
 import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useCatalog } from '../../stores/dishCatalog'
@@ -687,6 +705,19 @@ const recipeForm = reactive({
   total_batch_cost: 0,
   cost_per_serving: 0,
   suggested_price_floor: 0
+})
+
+const maxDiscountPercent = computed(() => {
+  const base = recipeDish.value?.base_price || 0
+  const floor = recipeForm.suggested_price_floor || 0
+  if (base <= 0 || floor >= base) return 0
+  return Math.max(0, Math.round(((base - floor) / base) * 100))
+})
+
+const dominantIngredients = computed(() => {
+  const total = recipeForm.total_batch_cost || 0
+  if (total <= 0) return []
+  return recipeForm.ingredients.filter(ing => (ing.item_cost || 0) > (0.40 * total))
 })
 
 const formatDateTimeLocal = (date) => {
@@ -919,7 +950,9 @@ const calculateFoodCost = () => {
   const servings = Math.max(1, recipeForm.yield_servings || 1)
   const perServing = totalBatch / servings
   recipeForm.cost_per_serving = Math.round(perServing * 100) / 100
-  recipeForm.suggested_price_floor = Math.round((perServing * 2.5) * 100) / 100
+  const rawFloor = Math.round((perServing * 1.2) * 100) / 100
+  const basePrice = recipeDish.value?.base_price ?? Infinity
+  recipeForm.suggested_price_floor = Math.min(basePrice, rawFloor)
 }
 
 const openRecipeModal = async (item) => {
@@ -1083,7 +1116,7 @@ const applySuggestedPriceFloor = async () => {
     const rosItem = activeRoster.value.find(d => d.id === recipeDish.value.id)
     if (rosItem) rosItem.price_floor = recipeForm.suggested_price_floor
 
-    showToast(`Price floor updated to ₱${recipeForm.suggested_price_floor.toFixed(2)} (2.5x margin applied)!`, 'success')
+    showToast(`Price floor updated to ₱${recipeForm.suggested_price_floor.toFixed(2)} (1.2x cost floor applied)!`, 'success')
   } catch (err) {
     showToast(`Failed to update price floor: ${err.message}`, 'error')
   } finally {

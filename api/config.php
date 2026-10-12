@@ -12,3 +12,5 @@ if (file_exists($envPath)) {
 if (!defined('GEMINI_MODEL')) {
     define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.5-flash');
 }
+
+const FLOOR_COST_MULTIPLIER = 1.2;

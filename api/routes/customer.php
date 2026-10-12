@@ -133,9 +133,17 @@ function handleGetMenu($pdo) {
     date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
 
+    $openingTime = !empty($settings['opening_time']) ? trim($settings['opening_time']) : '07:00';
+    $closingTime = !empty($settings['closing_time']) ? trim($settings['closing_time']) : '20:00';
+
     // Closing behavior: after closing_time, menu endpoint returns no purchasable items
     if (PricingEngine::isPastClosing($settings)) {
-        jsonResponse([]);
+        jsonResponse([
+            'opening_time' => $openingTime,
+            'closing_time' => $closingTime,
+            'is_open' => false,
+            'items' => []
+        ]);
     }
 
     $store_id = $_GET['store_id'] ?? null;
@@ -295,7 +303,12 @@ function handleGetMenu($pdo) {
         return $a['has_critical'] <=> $b['has_critical']; // 0 goes first, 1 goes last
     });
 
-    jsonResponse($result);
+    jsonResponse([
+        'opening_time' => $openingTime,
+        'closing_time' => $closingTime,
+        'is_open' => true,
+        'items' => $result
+    ]);
 }
 
 function handleCreateReservation($pdo) {

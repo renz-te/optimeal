@@ -507,8 +507,11 @@ function handleSaveDish($pdo) {
     $ai_confirmed = !empty($input['ai_confirmed']) ? 1 : 0;
     
     // Server-side confirmation validation
-    if ($calories !== null && $calories !== '' && !$ai_confirmed) {
-        jsonResponse(['error' => 'AI-estimated macros must be explicitly confirmed by the vendor'], 400);
+    $basePrice = (float)$input['base_price'];
+    $priceFloor = isset($input['price_floor']) ? (float)$input['price_floor'] : $basePrice;
+
+    if ($priceFloor < 0 || $priceFloor > $basePrice) {
+        jsonResponse(['error' => "Price floor cannot be negative and cannot exceed the base price of ₱{$basePrice}."], 422);
     }
 
     $rawIngredients = [];
@@ -811,6 +814,10 @@ function handleUpdateDecayConfig($pdo) {
 
     if ($tier1Discount < 0 || $tier1Discount > 100 || $tier2Discount < 0 || $tier2Discount > 100) {
         jsonResponse(['error' => 'Discount percentages must be between 0% and 100%.'], 400);
+    }
+
+    if ($tier2Discount < $tier1Discount) {
+        jsonResponse(['error' => 'Tier 2 discount percent must be greater than or equal to Tier 1 discount percent.'], 422);
     }
 
     $stmtUpdate = $pdo->prepare("
@@ -1298,7 +1305,7 @@ function handleGetRecipe($pdo) {
             'costed_count' => 0,
             'total_count' => 0,
             'suggested_price_floor' => 0.0,
-            'margin_multiplier' => 2.5
+            'margin_multiplier' => defined('FLOOR_COST_MULTIPLIER') ? FLOOR_COST_MULTIPLIER : 1.2
         ]);
     }
 
@@ -1392,7 +1399,8 @@ function handleGetRecipe($pdo) {
 
     $yieldServings = max(1, (int)$recipe['yield_servings']);
     $costPerServing = round($totalBatchCost / (float)$yieldServings, 2);
-    $suggestedPriceFloor = min((float)$dish['base_price'], round($costPerServing * 2.5, 2));
+    $multiplier = defined('FLOOR_COST_MULTIPLIER') ? FLOOR_COST_MULTIPLIER : 1.2;
+    $suggestedPriceFloor = min((float)$dish['base_price'], round($costPerServing * $multiplier, 2));
     $costCoverage = "{$costedCount} of {$totalCount} ingredients costed";
 
     jsonResponse([
@@ -1414,7 +1422,7 @@ function handleGetRecipe($pdo) {
         'cost_coverage' => $costCoverage,
         'costed_count' => $costedCount,
         'total_count' => $totalCount,
-        'margin_multiplier' => 2.5
+        'margin_multiplier' => $multiplier
     ]);
 }
 

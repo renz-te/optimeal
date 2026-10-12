@@ -32,7 +32,19 @@
       <button @click="dismissedSoftWarning = true" class="text-yellow-500 hover:text-yellow-700"><X :size="20"/></button>
     </div>
 
-    <!-- Filters Area -->
+    <!-- Closed Menu State (D1) -->
+    <div v-if="!isStoreOpen" class="bg-slate-50 border border-slate-200 rounded-2xl p-12 text-center my-6 shadow-sm">
+      <div class="w-16 h-16 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs">
+        <Clock :size="32" />
+      </div>
+      <h3 class="text-2xl font-black text-slate-900 mb-2">The Cafeteria is Currently Closed</h3>
+      <p class="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+        Service hours are {{ openingTime }} to {{ closingTime }}. The menu is locked and meal orders cannot be placed outside operating hours. Please visit us again during open hours!
+      </p>
+    </div>
+
+    <template v-else>
+      <!-- Filters Area -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
       <!-- Category Filters -->
       <div class="flex overflow-x-auto pb-2 gap-2 hide-scrollbar w-full sm:w-auto">
@@ -171,6 +183,7 @@
         </div>
       </div>
     </div>
+    </template>
 
     <!-- Item Detail Slide-Over Drawer -->
     <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
@@ -725,6 +738,22 @@ const orderType = ref('dine_in')
 const pickupSlots = ref([])
 const selectedPickupSlot = ref('')
 const isLoadingSlots = ref(false)
+const openingTime = ref('07:00')
+const closingTime = ref('20:00')
+const isStoreOpen = computed(() => {
+  if (isAdmin.value && activePreviewMode.value === 'customer') {
+    return true
+  }
+  if (!openingTime.value || !closingTime.value) return true
+  const now = new Date()
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  const [openH, openM] = openingTime.value.split(':').map(Number)
+  const [closeH, closeM] = closingTime.value.split(':').map(Number)
+  const openMinutes = openH * 60 + (openM || 0)
+  const closeMinutes = closeH * 60 + (closeM || 0)
+  return currentMinutes >= openMinutes && currentMinutes < closeMinutes
+})
+
 const limitWarning = ref('')
 const checkoutError = ref('')
 let limitWarningTimeout = null
@@ -851,7 +880,14 @@ const fetchMenu = async () => {
   try {
     const res = await fetch('/api/menu?store_id=1')
     if (res.ok) {
-      localMenuItems.value = await res.json()
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        localMenuItems.value = data
+      } else {
+        localMenuItems.value = data.items || []
+        if (data.opening_time) openingTime.value = data.opening_time
+        if (data.closing_time) closingTime.value = data.closing_time
+      }
     }
   } catch (e) {
     console.error('Failed to load live menu:', e)

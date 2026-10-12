@@ -353,23 +353,22 @@ function handleUpdateSettings($pdo) {
 
     $reservationTtl = isset($input['reservation_ttl']) ? max(1, (int)$input['reservation_ttl']) : ($current ? (int)$current['reservation_ttl'] : 30);
     $openingTime = isset($input['opening_time']) ? trim($input['opening_time']) : ($current ? $current['opening_time'] : '07:00');
-    $closingTime = isset($input['closing_time']) ? trim($input['closing_time']) : ($current ? $current['closing_time'] : '20:00');
+    // D2 & D3: Do not accept or save edits to closing_time and default_decay_rate
     $maxDiscountQty = isset($input['max_discount_qty']) ? max(0, (int)$input['max_discount_qty']) : ($current ? (int)$current['max_discount_qty'] : 5);
-    $defaultDecayRate = isset($input['default_decay_rate']) ? max(0, (float)$input['default_decay_rate']) : ($current ? (float)$current['default_decay_rate'] : 10.00);
     $aiEnabled = isset($input['ai_enabled']) ? ($input['ai_enabled'] ? 1 : 0) : ($current ? (int)$current['ai_enabled'] : 1);
 
     try {
         $stmt = $pdo->prepare("
             UPDATE settings 
-            SET reservation_ttl = ?, opening_time = ?, closing_time = ?, max_discount_qty = ?, default_decay_rate = ?, ai_enabled = ? 
+            SET reservation_ttl = ?, opening_time = ?, max_discount_qty = ?, ai_enabled = ? 
             WHERE id = 1
         ");
-        $stmt->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate, $aiEnabled]);
+        $stmt->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled]);
 
         // If no row updated, ensure row 1 exists
         if ($stmt->rowCount() === 0 && !$current) {
-            $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, ?, ?, ?, ?, ?, ?)");
-            $ins->execute([$reservationTtl, $openingTime, $closingTime, $maxDiscountQty, $defaultDecayRate, $aiEnabled]);
+            $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, ?, ?, '20:00', ?, 10.00, ?)");
+            $ins->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled]);
         }
 
         $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
