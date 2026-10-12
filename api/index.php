@@ -141,6 +141,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/dish' && $method === 'POST') {
     require 'routes/vendor.php';
     handleSaveDish($pdo);
+} elseif ($route === '/vendor/dish/image' && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleUploadDishImage($pdo);
 } elseif ($route === '/vendor/dish/recipe' && $method === 'GET') {
     require 'routes/vendor.php';
     handleGetRecipe($pdo);

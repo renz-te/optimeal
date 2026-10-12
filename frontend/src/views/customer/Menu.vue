@@ -93,13 +93,14 @@
           <span class="truncate">Notice: Contains {{ getDietaryConflicts(item).sensitivities.join(', ') }}</span>
         </div>
            
-        <div class="h-40 bg-slate-100 w-full relative">
+        <div class="h-40 bg-slate-100 w-full relative overflow-hidden">
           <!-- Image placeholder -->
-          <div v-if="!item.image_url" class="absolute inset-0 flex items-center justify-center text-gray-300">
-            <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+          <div v-if="!item.image_url" class="absolute inset-0 flex items-center justify-center text-slate-300">
+            <UtensilsCrossed :size="36" class="text-slate-300" />
           </div>
           <!-- Real image if exists -->
-          <img v-else :src="item.image_url" 
+          <img v-else :src="getImageUrl(item.image_url)" 
+               loading="lazy"
                class="w-full h-full object-cover transition-all" 
                :class="getDietaryConflicts(item).hasCriticalAllergen ? 'opacity-30 grayscale filter contrast-125' : (getDietaryConflicts(item).hasSensitivity ? 'opacity-75' : '')" 
                :alt="item.name">
@@ -208,6 +209,11 @@
               Out of Stock
             </div>
           </div>
+        </div>
+
+        <!-- Pinned Dish Photo in Drawer -->
+        <div v-if="selectedItem.image_url" class="h-44 w-full bg-slate-100 flex-shrink-0 overflow-hidden relative border-b border-slate-100">
+          <img :src="getImageUrl(selectedItem.image_url)" loading="lazy" class="w-full h-full object-cover" :alt="selectedItem.name" />
         </div>
 
         <!-- Zone 2: Scrollable Body -->
@@ -661,11 +667,17 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Utensils, ShoppingBag, Clock, SlidersHorizontal, AlertTriangle, X, Plus, Minus, Info, Package } from 'lucide-vue-next'
+import { Utensils, ShoppingBag, Clock, SlidersHorizontal, AlertTriangle, X, Plus, Minus, Info, Package, UtensilsCrossed } from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
 
 const router = useRouter()
 const { activePreviewMode, sandboxMenu, simulatedDietaryFlags, sandboxOrders } = useSandbox()
+
+const getImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http') || url.startsWith('/')) return url
+  return '/' + url
+}
 
 const localMenuItems = ref([])
 const menuItems = computed(() => {

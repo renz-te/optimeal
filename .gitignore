@@ -8,3 +8,5 @@ api/.env
 .DS_Store
 tests/*.txt
 tests/cookie_*
+uploads/dishes/*
+!uploads/dishes/.htaccess

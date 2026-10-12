@@ -186,6 +186,16 @@
               <ul class="divide-y divide-slate-100 text-sm">
                 <li v-for="item in (order.items || [])" :key="'item-' + item.id" class="py-2.5 flex items-center justify-between gap-3">
                   <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center flex-shrink-0">
+                      <img 
+                        v-if="item.image_url" 
+                        :src="getImageUrl(item.image_url)" 
+                        loading="lazy" 
+                        class="w-full h-full object-cover" 
+                        :alt="item.item_name || 'Dish'" 
+                      />
+                      <UtensilsCrossed v-else class="w-4 h-4 text-slate-400 stroke-[1.5]" />
+                    </div>
                     <span class="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center justify-center shrink-0">
                       {{ item.quantity }}x
                     </span>
@@ -296,6 +306,10 @@
                     :key="'past-item-' + item.id"
                     class="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-700"
                   >
+                    <span class="w-4 h-4 rounded bg-slate-200/80 overflow-hidden flex items-center justify-center shrink-0">
+                      <img v-if="item.image_url" :src="getImageUrl(item.image_url)" loading="lazy" class="w-full h-full object-cover" :alt="item.item_name || 'Dish'" />
+                      <UtensilsCrossed v-else class="w-2.5 h-2.5 text-slate-400" />
+                    </span>
                     <span class="font-bold text-emerald-700">{{ item.quantity }}x</span>
                     <span>{{ item.item_name }}</span>
                     <span class="text-slate-400 font-mono">₱{{ (Number(item.unit_price_at_order) * Number(item.quantity)).toFixed(2) }}</span>
@@ -332,8 +346,14 @@
 import { ref, computed, onMounted } from 'vue'
 import {
   Clock, RefreshCw, Utensils, ShoppingBag, Package, Calendar,
-  KeyRound, Receipt, Archive, CheckCircle2, AlertTriangle, X
+  KeyRound, Receipt, Archive, CheckCircle2, AlertTriangle, X, UtensilsCrossed
 } from 'lucide-vue-next'
+
+const getImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http') || url.startsWith('/')) return url
+  return '/' + url
+}
 
 const orders = ref([])
 const loading = ref(false)

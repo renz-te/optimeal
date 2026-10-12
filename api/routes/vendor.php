@@ -128,7 +128,7 @@ function handleGetOrders($pdo) {
     if (!empty($orderIds)) {
         $inQuery = implode(',', array_fill(0, count($orderIds), '?'));
         $itemStmt = $pdo->prepare("
-            SELECT oi.order_id, oi.menu_item_id, oi.quantity, oi.portion_preference, m.name as item_name
+            SELECT oi.order_id, oi.menu_item_id, oi.quantity, oi.portion_preference, m.name as item_name, m.image_url
             FROM order_items oi
             JOIN menu_items m ON oi.menu_item_id = m.id
             WHERE oi.order_id IN ($inQuery)
@@ -503,6 +503,118 @@ function syncDishIngredientLinks($pdo, $menuItemId, $storeId, ?array $additional
     ];
 }
 
+function deleteDishImageSafely($imageUrl) {
+    if (empty($imageUrl) || !is_string($imageUrl)) {
+        return;
+    }
+    $cleanPath = ltrim($imageUrl, '/');
+    if (str_starts_with($cleanPath, 'optimeal/')) {
+        $cleanPath = substr($cleanPath, 9);
+    }
+    if (!str_starts_with($cleanPath, 'uploads/dishes/') || str_contains($cleanPath, '..')) {
+        return;
+    }
+    $filename = basename($cleanPath);
+    if ($filename === '.htaccess' || empty($filename)) {
+        return;
+    }
+    $uploadDir = realpath(__DIR__ . '/../../uploads/dishes');
+    if (!$uploadDir) {
+        return;
+    }
+    $filePath = $uploadDir . DIRECTORY_SEPARATOR . $filename;
+    $realFilePath = realpath($filePath);
+    if ($realFilePath && str_starts_with($realFilePath, $uploadDir) && file_exists($realFilePath)) {
+        @unlink($realFilePath);
+    }
+}
+
+function handleUploadDishImage($pdo) {
+    requireStaff($pdo);
+
+    if (empty($_FILES['image']) || !is_array($_FILES['image'])) {
+        jsonResponse(['error' => 'No image file uploaded.'], 422);
+    }
+
+    $file = $_FILES['image'];
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        $errMap = [
+            UPLOAD_ERR_INI_SIZE   => 'Image size exceeds server configuration limit.',
+            UPLOAD_ERR_FORM_SIZE  => 'Image size exceeds form limit.',
+            UPLOAD_ERR_PARTIAL    => 'File was only partially uploaded.',
+            UPLOAD_ERR_NO_FILE    => 'No image file uploaded.',
+            UPLOAD_ERR_NO_TMP_DIR => 'Missing temporary folder.',
+            UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+            UPLOAD_ERR_EXTENSION  => 'File upload blocked by extension.'
+        ];
+        jsonResponse(['error' => $errMap[$file['error']] ?? 'Image upload failed.'], 422);
+    }
+
+    // 1. File size validation (Max 2MB)
+    $maxBytes = 2 * 1024 * 1024;
+    if ($file['size'] > $maxBytes || $file['size'] <= 0) {
+        jsonResponse(['error' => 'Image size exceeds the 2MB limit.'], 422);
+    }
+
+    $tmpPath = $file['tmp_name'];
+    if (!is_uploaded_file($tmpPath)) {
+        jsonResponse(['error' => 'Invalid upload origin.'], 422);
+    }
+
+    // 2. MIME type validation with finfo
+    $allowedMimes = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp'
+    ];
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $detectedMime = finfo_file($finfo, $tmpPath);
+    finfo_close($finfo);
+
+    if (!isset($allowedMimes[$detectedMime])) {
+        jsonResponse(['error' => 'Invalid image format. Only JPEG, PNG, and WebP are allowed.'], 422);
+    }
+
+    // 3. Binary header & dimension validation with getimagesize
+    $imageInfo = @getimagesize($tmpPath);
+    if ($imageInfo === false) {
+        jsonResponse(['error' => 'Corrupt or invalid image file.'], 422);
+    }
+
+    if (!isset($imageInfo['mime']) || !isset($allowedMimes[$imageInfo['mime']])) {
+        jsonResponse(['error' => 'Image metadata does not match allowed image formats.'], 422);
+    }
+
+    // 4. Generate random hex filename
+    $ext = $allowedMimes[$detectedMime];
+    $filename = bin2hex(random_bytes(16)) . '.' . $ext;
+
+    // 5. Ensure uploads directory exists
+    $uploadDir = realpath(__DIR__ . '/../../uploads/dishes');
+    if (!$uploadDir) {
+        $candidate = __DIR__ . '/../../uploads/dishes';
+        if (!is_dir($candidate)) {
+            mkdir($candidate, 0755, true);
+        }
+        $uploadDir = realpath($candidate);
+    }
+    if (!$uploadDir) {
+        jsonResponse(['error' => 'Failed to resolve upload destination directory.'], 500);
+    }
+
+    $destination = $uploadDir . DIRECTORY_SEPARATOR . $filename;
+
+    if (!move_uploaded_file($tmpPath, $destination)) {
+        jsonResponse(['error' => 'Failed to store uploaded image.'], 500);
+    }
+
+    jsonResponse([
+        'message' => 'Image uploaded successfully',
+        'image_url' => 'uploads/dishes/' . $filename
+    ]);
+}
+
 function handleSaveDish($pdo) {
     $store_id = requireVendor($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
@@ -531,6 +643,20 @@ function handleSaveDish($pdo) {
         jsonResponse(['error' => "Price floor cannot be negative and cannot exceed the base price of ₱{$basePrice}."], 422);
     }
 
+    // Validate image_url strictly if provided
+    $imageUrl = null;
+    if (isset($input['image_url']) && trim($input['image_url']) !== '') {
+        $rawUrl = trim($input['image_url']);
+        $cleanUrl = ltrim($rawUrl, '/');
+        if (str_starts_with($cleanUrl, 'optimeal/')) {
+            $cleanUrl = substr($cleanUrl, 9);
+        }
+        if (!str_starts_with($cleanUrl, 'uploads/dishes/') || str_contains($cleanUrl, '..')) {
+            jsonResponse(['error' => 'Invalid image URL: must be stored in uploads/dishes/'], 422);
+        }
+        $imageUrl = 'uploads/dishes/' . basename($cleanUrl);
+    }
+
     $rawIngredients = [];
     if (!empty($input['ingredients']) && is_array($input['ingredients'])) {
         $rawIngredients = $input['ingredients'];
@@ -544,6 +670,13 @@ function handleSaveDish($pdo) {
         $pdo->beginTransaction();
         
         if ($dishId) {
+            $oldDishStmt = $pdo->prepare("SELECT image_url FROM menu_items WHERE id = ? AND store_id = ?");
+            $oldDishStmt->execute([$dishId, $store_id]);
+            $oldImageUrl = $oldDishStmt->fetchColumn();
+            if ($oldImageUrl && $oldImageUrl !== $imageUrl) {
+                deleteDishImageSafely($oldImageUrl);
+            }
+
             $stmt = $pdo->prepare("
                 UPDATE menu_items 
                 SET name = ?, description = ?, category = ?, dietary = ?, base_price = ?, price_floor = ?, image_url = ?,
@@ -557,7 +690,7 @@ function handleSaveDish($pdo) {
                 $dietary,
                 $input['base_price'],
                 isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
-                isset($input['image_url']) ? $input['image_url'] : null,
+                $imageUrl,
                 $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
                 $ingredientsText,
                 $dishId, $store_id
@@ -575,7 +708,7 @@ function handleSaveDish($pdo) {
                 $dietary,
                 $input['base_price'],
                 isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
-                isset($input['image_url']) ? $input['image_url'] : null,
+                $imageUrl,
                 $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
                 $ingredientsText
             ]);

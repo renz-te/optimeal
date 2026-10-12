@@ -56,6 +56,16 @@
 
           <div v-if="order.items && order.items.length > 0" class="space-y-1.5 pt-2 border-t border-slate-100">
             <div v-for="(item, idx) in order.items" :key="idx" class="text-sm text-slate-800 font-bold flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center flex-shrink-0">
+                <img 
+                  v-if="item.image_url" 
+                  :src="getImageUrl(item.image_url)" 
+                  loading="lazy" 
+                  class="w-full h-full object-cover" 
+                  :alt="item.item_name || 'Dish'" 
+                />
+                <UtensilsCrossed v-else class="w-4 h-4 text-slate-400 stroke-[1.5]" />
+              </div>
               <span class="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded text-xs font-black">{{ item.quantity || 1 }}x</span>
               <span>{{ item.item_name || item.name || (item.item && item.item.name) }}</span>
               <span v-if="item.portion_preference && item.portion_preference !== 'no_preference'" class="text-xs font-medium text-slate-500 italic bg-slate-100 px-2 py-0.5 rounded-full capitalize">
@@ -155,8 +165,14 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { AlertTriangle, Check, Bell } from 'lucide-vue-next'
+import { AlertTriangle, Check, Bell, UtensilsCrossed } from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
+
+const getImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http') || url.startsWith('/')) return url
+  return '/' + url
+}
 
 const { sandboxOrders, sandboxMenu, activePreviewMode } = useSandbox()
 const activeTab = ref('Pending Pickup')

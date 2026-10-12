@@ -1,0 +1,25 @@
+# OptiMeal Uploads Security Policy
+# Deny script execution and directory indexing
+
+Options -Indexes -ExecCGI
+
+# Deny direct execution of scripts
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|php8|phps|cgi|pl|exe|sh|py|jsp|asp|htm|html|js)$">
+    Require all denied
+</FilesMatch>
+
+# Disable PHP engine if mod_php is loaded
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+# Restrict served filetypes strictly to safe images
+<FilesMatch "\.(jpe?g|png|webp|gif)$">
+    Require all granted
+</FilesMatch>

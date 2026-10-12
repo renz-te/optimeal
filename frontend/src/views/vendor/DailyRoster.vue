@@ -181,6 +181,63 @@
               </div>
             </div>
 
+            <!-- Dish Photo Upload & Preview -->
+            <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Dish Photo</label>
+              <div class="flex items-center gap-4">
+                <div class="w-20 h-20 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center relative flex-shrink-0 shadow-xs">
+                  <img 
+                    v-if="formData.image_url" 
+                    :src="getImageUrl(formData.image_url)" 
+                    loading="lazy" 
+                    class="w-full h-full object-cover" 
+                    alt="Dish Preview" 
+                  />
+                  <div v-else class="flex flex-col items-center justify-center text-slate-400">
+                    <Camera class="w-6 h-6 stroke-[1.5]" />
+                    <span class="text-[9px] font-semibold mt-1">No Photo</span>
+                  </div>
+                  <div v-if="isUploadingImage" class="absolute inset-0 bg-white/80 backdrop-blur-xs flex items-center justify-center">
+                    <Loader2 class="w-5 h-5 animate-spin text-emerald-600" />
+                  </div>
+                </div>
+
+                <div class="flex-1 space-y-1.5">
+                  <div class="flex items-center gap-2">
+                    <label 
+                      class="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-300 transition-colors"
+                      :class="isUploadingImage ? 'opacity-50 pointer-events-none' : ''"
+                    >
+                      <UploadCloud class="w-3.5 h-3.5 text-slate-500" />
+                      <span>{{ formData.image_url ? 'Change Photo' : 'Upload Photo' }}</span>
+                      <input 
+                        type="file" 
+                        ref="fileInputRef"
+                        accept="image/jpeg,image/png,image/webp" 
+                        class="hidden" 
+                        @change="handleImageFileSelect" 
+                      />
+                    </label>
+                    <button 
+                      v-if="formData.image_url" 
+                      type="button" 
+                      @click="removeDishImage" 
+                      class="px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                  <p class="text-[11px] text-slate-400 leading-tight">
+                    PNG, JPEG, or WebP. Max 2MB.
+                  </p>
+                  <p v-if="imageUploadError" class="text-[11px] text-rose-600 font-semibold">
+                    {{ imageUploadError }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <!-- AI Kill Switch Warning Banner -->
             <div v-if="aiDisabled" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs flex items-center gap-2 mb-2">
               <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0" />
@@ -667,7 +724,7 @@
 
 <script setup>
 import { ref, onMounted, reactive, watch, computed } from 'vue'
-import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2 } from 'lucide-vue-next'
+import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2, Camera, UploadCloud } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useCatalog } from '../../stores/dishCatalog'
 import { useSandbox } from '../../stores/sandbox'
@@ -763,8 +820,67 @@ const formData = reactive({
   dietary: [],
   sensitivities: [],
   saveToCatalog: false,
-  isAllergenFree: false
+  isAllergenFree: false,
+  image_url: ''
 })
+
+const fileInputRef = ref(null)
+const isUploadingImage = ref(false)
+const imageUploadError = ref('')
+
+const getImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http') || url.startsWith('/')) return url
+  return '/' + url
+}
+
+const removeDishImage = () => {
+  formData.image_url = ''
+  imageUploadError.value = ''
+  if (fileInputRef.value) fileInputRef.value.value = ''
+}
+
+const handleImageFileSelect = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  imageUploadError.value = ''
+
+  if (file.size > 2 * 1024 * 1024) {
+    imageUploadError.value = 'File size exceeds 2MB limit.'
+    if (fileInputRef.value) fileInputRef.value.value = ''
+    return
+  }
+
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    imageUploadError.value = 'Only JPEG, PNG, or WebP images are allowed.'
+    if (fileInputRef.value) fileInputRef.value.value = ''
+    return
+  }
+
+  isUploadingImage.value = true
+  try {
+    const uploadData = new FormData()
+    uploadData.append('image', file)
+
+    const res = await fetch('/api/vendor/dish/image', {
+      method: 'POST',
+      body: uploadData
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      imageUploadError.value = data.error || 'Failed to upload image.'
+    } else {
+      formData.image_url = data.image_url
+    }
+  } catch (err) {
+    imageUploadError.value = 'Network error while uploading image.'
+  } finally {
+    isUploadingImage.value = false
+    if (fileInputRef.value) fileInputRef.value.value = ''
+  }
+}
 
 const isEnriching = ref(false)
 const aiDisabled = ref(false)
@@ -1198,6 +1314,8 @@ const openEditModal = (item) => {
   formData.dietary = [...(item.dietary || [])]
   formData.sensitivities = [...(item.sensitivities || [])]
   formData.isAllergenFree = formData.allergens.length === 0
+  formData.image_url = item.image_url || ''
+  imageUploadError.value = ''
   showCustomModal.value = true
 }
 
@@ -1221,6 +1339,9 @@ const closeModal = () => {
   formData.sensitivities = []
   formData.saveToCatalog = false
   formData.isAllergenFree = false
+  formData.image_url = ''
+  imageUploadError.value = ''
+  if (fileInputRef.value) fileInputRef.value.value = ''
   aiDisabled.value = false
   aiDisabledMessage.value = ''
 }
@@ -1271,7 +1392,8 @@ const saveDish = async () => {
     ingredientsString: formData.ingredientsString,
     macros: formData.macros,
     ai_confirmed: formData.ai_confirmed,
-    portion: formData.portion
+    portion: formData.portion,
+    image_url: formData.image_url || null
   }
 
   let finalAllergens = [...formData.allergens]

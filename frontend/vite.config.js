@@ -15,6 +15,11 @@ export default defineConfig({
             console.error('[Vite Proxy Error]:', err.message);
           });
         }
+      },
+      '/uploads': {
+        target: 'http://127.0.0.1/optimeal',
+        changeOrigin: true,
+        secure: false,
       }
     }
   }
