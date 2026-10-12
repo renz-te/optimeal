@@ -43,10 +43,12 @@ function apiRequest($url, $method = 'GET', $data = null, $cookieFile = null) {
 
 echo "=== PHASE C7: VENDOR DAILY AUDIT SUMMARY VERIFICATION ===\n\n";
 
-// 1. Vendor Login
+$testOrderId = null;
+try {
+    // 1. Vendor Login
 echo "1. Vendor Login...\n";
 $vendorLogin = apiRequest("$baseUrl/auth/login", 'POST', [
-    'email' => 'testvendor@optimeal.test',
+    'email' => 'canteen@optimeal.test',
     'password' => 'password123'
 ], $cookieFileVendor);
 echo "   Status: {$vendorLogin['code']}, Role: " . ($vendorLogin['body']['role'] ?? 'Failed') . "\n";
@@ -72,7 +74,7 @@ echo "     - Total Revenue: ₱" . number_format($baseSummary['total_revenue'], 
 echo "     - Claimed Orders: " . $baseSummary['claimed_orders'] . "\n";
 echo "     - Total Orders: " . $baseSummary['total_orders'] . "\n";
 echo "     - Unsold Stock Units: " . $baseSummary['total_unsold_units'] . "\n";
-echo "     - Est. Waste Value: ₱" . number_format($baseSummary['total_waste_value'], 2) . "\n";
+echo "     - Est. Waste Value: ₱" . number_format($baseSummary['unsold_stock_value'] ?? $baseSummary['waste_actual_cost'] ?? $baseSummary['total_waste_value'] ?? 0, 2) . "\n";
 
 // 4. Place a Test Order as Student
 echo "\n4. Placing test reservation as student...\n";
@@ -151,7 +153,14 @@ foreach ($updatedAudit['body']['orders'] as $ord) {
 }
 assert($foundInLedger, "Claimed order must appear in today's audit ledger");
 
-echo "\n=== ALL DAILY AUDIT VERIFICATIONS PASSED SUCCESSFULLY! ===\n";
+    echo "\n=== ALL DAILY AUDIT VERIFICATIONS PASSED SUCCESSFULLY! ===\n";
 
-if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
-if (file_exists($cookieFileStudent)) unlink($cookieFileStudent);
+} finally {
+    if (isset($pdo) && !empty($testOrderId)) {
+        $pdo->exec("DELETE FROM payments WHERE order_id = $testOrderId");
+        $pdo->exec("DELETE FROM order_items WHERE order_id = $testOrderId");
+        $pdo->exec("DELETE FROM orders WHERE id = $testOrderId");
+    }
+    if (file_exists($cookieFileVendor)) @unlink($cookieFileVendor);
+    if (file_exists($cookieFileStudent)) @unlink($cookieFileStudent);
+}

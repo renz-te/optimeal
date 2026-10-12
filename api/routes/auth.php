@@ -30,6 +30,7 @@ function handleLogin($pdo) {
         $user = $stmt->fetch();
         
         if ($user && password_verify($input['password'], $user['password_hash'])) {
+            session_regenerate_id(true);
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['role'] = $user['role'];
             jsonResponse([
@@ -40,7 +41,10 @@ function handleLogin($pdo) {
         } else {
             jsonResponse(['error' => 'Invalid credentials'], 401);
         }
+    } catch (BusinessException $e) {
+        jsonResponse(['error' => $e->getMessage()], $e->getCode() ?: 400);
     } catch (Exception $e) {
-        jsonResponse(['error' => $e->getMessage()], 500);
+        error_log($e->getMessage());
+        jsonResponse(['error' => 'An internal server error occurred.'], 500);
     }
 }

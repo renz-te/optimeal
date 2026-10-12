@@ -36,7 +36,8 @@ function apiRequest($url, $method = 'GET', $data = null, $cookieFile = null) {
 
 echo "=== PHASE D1 AUTOMATED VERIFICATION SUITE ===\n\n";
 
-// STEP 1: Verify Timezone Lock in MySQL & PHP
+try {
+    // STEP 1: Verify Timezone Lock in MySQL & PHP
 echo "--- TEST 1: Timezone Lock ---\n";
 $tzStmt = $pdo->query("SELECT @@session.time_zone AS sess_tz, @@global.time_zone AS glob_tz, NOW() AS db_now, CURDATE() AS db_curdate");
 $tzRow = $tzStmt->fetch();
@@ -111,7 +112,7 @@ $pdo->prepare("
 
 // Login vendor
 $loginVendor = apiRequest("$baseUrl/auth/login", 'POST', [
-    'email' => 'testvendor@optimeal.test',
+    'email' => 'canteen@optimeal.test',
     'password' => 'password123'
 ], $cookieFileVendor);
 echo "Vendor Login: HTTP {$loginVendor['status']}\n\n";
@@ -245,4 +246,18 @@ if ($auditRes['status'] === 200) {
     echo "✗ TEST 4 FAILED: Could not retrieve daily audit!\n\n";
 }
 
-echo "=== ALL PHASE D1 TESTS COMPLETED ===\n";
+    echo "=== ALL PHASE D1 TESTS COMPLETED ===\n";
+
+} finally {
+    if (isset($pdo)) {
+        $pdo->exec("
+            DELETE FROM order_items WHERE menu_item_id IN (901, 902);
+            DELETE FROM orders WHERE id NOT IN (SELECT DISTINCT order_id FROM order_items);
+            DELETE FROM menu_item_critical_allergens WHERE menu_item_id IN (901, 902);
+            DELETE FROM inventory WHERE menu_item_id IN (901, 902);
+            DELETE FROM menu_items WHERE id IN (901, 902);
+        ");
+    }
+    if (file_exists($cookieFileVendor)) @unlink($cookieFileVendor);
+    if (file_exists($cookieFileStudent)) @unlink($cookieFileStudent);
+}

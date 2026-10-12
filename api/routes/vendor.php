@@ -172,12 +172,12 @@ function handleUpdateOrderStatus($pdo) {
         $order = $checkStmt->fetch();
 
         if (!$order) {
-            throw new Exception("Order not found or does not belong to your store.");
+            throw new BusinessException("Order not found or does not belong to your store.", 404);
         }
         
         // Prevent changing status if already cancelled or completed
         if (in_array($order['status'], ['cancelled', 'completed'])) {
-            throw new Exception("Cannot change status of a " . $order['status'] . " order.");
+            throw new BusinessException("Cannot change status of a " . $order['status'] . " order.", 400);
         }
 
         // Restrict "Mark Claimed" action if allergen_override is active until confirmed by staff
@@ -185,7 +185,7 @@ function handleUpdateOrderStatus($pdo) {
             $staffConfirmed = !empty($input['confirm_allergen_override']) || !empty($input['allergen_confirmed']);
             if (!$staffConfirmed) {
                 $conflicts = !empty($order['allergen_conflicts']) ? $order['allergen_conflicts'] : 'undisclosed allergens';
-                throw new Exception("Allergen Warning: This order has an active allergen override ($conflicts). Staff confirmation is required to mark it as claimed.");
+                throw new BusinessException("Allergen Warning: This order has an active allergen override ($conflicts). Staff confirmation is required to mark it as claimed.", 400);
             }
         }
 
@@ -199,16 +199,33 @@ function handleUpdateOrderStatus($pdo) {
             $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
 
             $restoreStmt = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty + ?, delisted_from_app = CASE WHEN online_pool_qty + ? > critical_stock_threshold THEN 0 ELSE delisted_from_app END WHERE menu_item_id = ?");
+            $refundClaim = $pdo->prepare("
+                UPDATE daily_discount_claims d
+                JOIN orders o ON o.user_id = d.user_id
+                SET d.quantity_claimed = GREATEST(0, d.quantity_claimed - ?)
+                WHERE d.menu_item_id = ? AND o.id = ? AND d.claim_date = DATE(o.reserved_at)
+            ");
+
             foreach ($items as $item) {
                 $restoreStmt->execute([$item['quantity'], $item['quantity'], $item['menu_item_id']]);
+                $refundClaim->execute([$item['quantity'], $item['menu_item_id'], $order_id]);
             }
         }
 
         $pdo->commit();
         jsonResponse(['message' => 'Order status updated successfully']);
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
     } catch (Exception $e) {
-        $pdo->rollBack();
-        jsonResponse(['error' => $e->getMessage()], 400);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleUpdateOrderStatus error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
 
@@ -586,9 +603,18 @@ function handleSaveDish($pdo) {
         $pdo->commit();
         
         jsonResponse(['message' => 'Dish saved', 'id' => $dishId, 'mapped_allergens' => $mappedAllergenNames]);
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
     } catch (Exception $e) {
-        $pdo->rollBack();
-        jsonResponse(['error' => 'Failed to save dish: ' . $e->getMessage()], 500);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleSaveDish error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to save dish due to an internal server error.'], 500);
     }
 }
 
@@ -672,9 +698,18 @@ function handleLaunchMenu($pdo) {
 
         $pdo->commit();
         jsonResponse(['message' => 'Menu launched successfully']);
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
     } catch (Exception $e) {
-        $pdo->rollBack();
-        jsonResponse(['error' => 'Failed to launch menu: ' . $e->getMessage()], 500);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleLaunchMenu error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to launch menu due to an internal server error.'], 500);
     }
 }
 
@@ -1559,9 +1594,18 @@ function handleSaveRecipe($pdo) {
             'has_unmapped' => $hasUnmapped
         ], 200);
 
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
     } catch (Exception $e) {
-        $pdo->rollBack();
-        jsonResponse(['error' => 'Failed to save recipe: ' . $e->getMessage()], 500);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleSaveRecipe error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to save recipe due to an internal server error.'], 500);
     }
 }
 
@@ -1594,10 +1638,7 @@ function handleSuggestRecipe($pdo) {
         if ($n !== '') $existingIngredientsList[] = $n;
     }
 
-    // In PHP sort modifies in place
-    $sortedList = $existingIngredientsList;
-    sort($sortedList);
-    $cacheKey = 'recipe_suggest_' . md5(json_encode($sortedList));
+    $cacheKey = 'recipe_suggest_' . md5(strtolower(trim($dishName)) . '|' . json_encode($existingIngredientsList));
 
     $stmtCache = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name IN (?, ?) LIMIT 1");
     $stmtCache->execute([$cacheKey, 'recipe_' . md5(strtolower($dishName))]);

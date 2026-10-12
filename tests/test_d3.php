@@ -62,7 +62,10 @@ if ($vendorLogin['status'] !== 200) {
 }
 echo "✓ 1. Vendor Authenticated (Store 1)\n";
 
-// 2. Authenticate Student (student@optimeal.test)
+$dishAId = null;
+$dishBId = null;
+try {
+    // 2. Authenticate Student (student@optimeal.test)
 $studentLogin = apiRequest("$baseUrl/auth/login", 'POST', [
     'email' => 'student@optimeal.test',
     'password' => 'password123'
@@ -165,7 +168,7 @@ if ($menuRes['status'] !== 200) {
     exit(1);
 }
 
-$menuItems = $menuRes['data'] ?? [];
+$menuItems = $menuRes['data']['items'] ?? $menuRes['data'] ?? [];
 $foundA = false;
 $foundB = false;
 
@@ -273,7 +276,7 @@ $stockAAfter = $checkAAfter->fetch(PDO::FETCH_ASSOC);
 echo "Dish A Remaining Online Stock: {$stockAAfter['online_pool_qty']} (Expected: 0)\n";
 
 $menuResAfter = apiRequest("$baseUrl/menu?store_id=$storeId", 'GET', null, $cookieStudent);
-$menuAfterItems = $menuResAfter['data'] ?? [];
+$menuAfterItems = $menuResAfter['data']['items'] ?? $menuResAfter['data'] ?? [];
 $foundAAfter = false;
 foreach ($menuAfterItems as $m) {
     if ((int)$m['id'] === $dishAId) $foundAAfter = true;
@@ -325,10 +328,21 @@ if ($webTest['status'] === 403) {
     exit(1);
 }
 
-// Clean up cookies
-if (file_exists($cookieVendor)) @unlink($cookieVendor);
-if (file_exists($cookieStudent)) @unlink($cookieStudent);
+    echo "\n============================================\n";
+    echo "✓ ALL PHASE D3 VERIFICATIONS PASSED CLEANLY!\n";
+    echo "============================================\n";
 
-echo "\n============================================\n";
-echo "✓ ALL PHASE D3 VERIFICATIONS PASSED CLEANLY!\n";
-echo "============================================\n";
+} finally {
+    if (isset($pdo)) {
+        $ids = array_filter([$dishAId ?? null, $dishBId ?? null]);
+        if (!empty($ids)) {
+            $inD = implode(',', $ids);
+            $pdo->exec("DELETE FROM order_items WHERE menu_item_id IN ($inD)");
+            $pdo->exec("DELETE FROM orders WHERE id NOT IN (SELECT DISTINCT order_id FROM order_items)");
+            $pdo->exec("DELETE FROM inventory WHERE menu_item_id IN ($inD)");
+            $pdo->exec("DELETE FROM menu_items WHERE id IN ($inD)");
+        }
+    }
+    if (file_exists($cookieVendor)) @unlink($cookieVendor);
+    if (file_exists($cookieStudent)) @unlink($cookieStudent);
+}

@@ -61,7 +61,9 @@ if ($vendorLogin['status'] !== 200) {
 }
 echo "✓ 1. Vendor Authenticated (Store 1)\n";
 
-// 2. Set Chicken cost to ₱200/kg
+$dishId = null;
+try {
+    // 2. Set Chicken cost to ₱200/kg
 echo "\n--- TEST STEP 1: Set Chicken Cost to ₱200/kg ---\n";
 $setCostRes = apiRequest("$baseUrl/vendor/ingredient-costs", 'POST', [
     'items' => [
@@ -151,10 +153,10 @@ $suggestedFloor = (float)($recData['suggested_price_floor'] ?? 0);
 
 echo "Total Batch Cost:       ₱$totalBatchCost (Expected: ₱50.00)\n";
 echo "Cost Per Serving:       ₱$costPerServing (Expected: ₱50.00)\n";
-echo "Suggested Price Floor:  ₱$suggestedFloor (Expected: ₱125.00 [₱50 * 2.5])\n";
+echo "Suggested Price Floor:  ₱$suggestedFloor (Expected: ₱60.00 [₱50 * 1.2])\n";
 
-if ($costPerServing === 50.00 && $suggestedFloor === 125.00) {
-    echo "✓ TEST STEP 3 PASSED: Math perfectly matches (250g @ ₱200/kg = ₱50.00 cost, 2.5x floor = ₱125.00)!\n";
+if ($costPerServing === 50.00 && $suggestedFloor === 60.00) {
+    echo "✓ TEST STEP 3 PASSED: Math perfectly matches (250g @ ₱200/kg = ₱50.00 cost, 1.2x floor = ₱60.00)!\n";
 } else {
     echo "✗ TEST STEP 3 FAILED: Math mismatch!\n";
     exit(1);
@@ -232,9 +234,17 @@ if ($webTest['status'] === 403) {
     exit(1);
 }
 
-// Clean up cookies
-if (file_exists($cookieVendor)) @unlink($cookieVendor);
+    echo "\n============================================\n";
+    echo "✓ ALL PHASE D4 VERIFICATIONS PASSED CLEANLY!\n";
+    echo "============================================\n";
 
-echo "\n============================================\n";
-echo "✓ ALL PHASE D4 VERIFICATIONS PASSED CLEANLY!\n";
-echo "============================================\n";
+} finally {
+    if (isset($pdo) && !empty($dishId)) {
+        $pdo->exec("DELETE FROM order_items WHERE menu_item_id = $dishId");
+        $pdo->exec("DELETE FROM recipe_ingredients WHERE recipe_id IN (SELECT id FROM recipes WHERE menu_item_id = $dishId)");
+        $pdo->exec("DELETE FROM recipes WHERE menu_item_id = $dishId");
+        $pdo->exec("DELETE FROM inventory WHERE menu_item_id = $dishId");
+        $pdo->exec("DELETE FROM menu_items WHERE id = $dishId");
+    }
+    if (file_exists($cookieVendor)) @unlink($cookieVendor);
+}

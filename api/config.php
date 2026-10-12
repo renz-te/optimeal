@@ -14,3 +14,5 @@ if (!defined('GEMINI_MODEL')) {
 }
 
 const FLOOR_COST_MULTIPLIER = 1.2;
+
+class BusinessException extends Exception {}

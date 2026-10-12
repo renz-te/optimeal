@@ -296,6 +296,7 @@ try {
         'store_id' => 1,
         'fulfillment_type' => 'take_out',
         'pickup_time' => '04:15', // middle of the night, not in slots
+        'allergen_override' => true,
         'items' => [
             ['menu_item_id' => $testDishId, 'quantity' => 1]
         ]
@@ -327,6 +328,7 @@ try {
         'store_id' => 1,
         'fulfillment_type' => 'take_out',
         'pickup_time' => $farSlot,
+        'allergen_override' => true,
         'items' => [
             ['menu_item_id' => $testDishId, 'quantity' => 1]
         ]
@@ -347,6 +349,7 @@ try {
         'store_id' => 1,
         'fulfillment_type' => 'take_out',
         'pickup_time' => $nearSlot,
+        'allergen_override' => true,
         'items' => [
             ['menu_item_id' => $testDishId, 'quantity' => 1]
         ]

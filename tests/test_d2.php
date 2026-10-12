@@ -53,10 +53,12 @@ if ($login['status'] !== 200) {
 }
 echo "✓ Vendor Login: HTTP 200 (Store 1 Authenticated)\n\n";
 
-// --- TEST 1: AI Kill Switch Enforcement ---
-echo "--- TEST 1: AI Kill Switch Enforcement ---\n";
-// Temporarily disable AI
-$pdo->query("UPDATE settings SET ai_enabled = 0 WHERE id = 1");
+$cacheKey = null;
+try {
+    // --- TEST 1: AI Kill Switch Enforcement ---
+    echo "--- TEST 1: AI Kill Switch Enforcement ---\n";
+    // Temporarily disable AI
+    $pdo->query("UPDATE settings SET ai_enabled = 0 WHERE id = 1");
 
 $resKill = apiRequest("$baseUrl/vendor/dish/recipe/suggest", 'POST', [
     'dish_name' => 'Chicken Adobo',
@@ -214,10 +216,17 @@ if ($garlicPass && $soyPass && $calamansiPass && $herbPass) {
     echo "✗ TEST 6 FAILED: Prep plan combination math mismatch.\n\n";
 }
 
-// --- CLEANUP ---
-echo "--- Cleanup Test Artifacts ---\n";
-$pdo->prepare("DELETE FROM ai_query_cache WHERE dish_name = ?")->execute([$cacheKey]);
-if (file_exists($cookieVendor)) @unlink($cookieVendor);
-echo "✓ Temporary test cache entries and cookies purged.\n\n";
+    echo "=== ALL PHASE D2 TESTS COMPLETED SUCCESSFULLY ===\n";
 
-echo "=== ALL PHASE D2 TESTS COMPLETED SUCCESSFULLY ===\n";
+} finally {
+    // --- CLEANUP ---
+    echo "--- Cleanup Test Artifacts ---\n";
+    if (isset($pdo)) {
+        $pdo->query("UPDATE settings SET ai_enabled = 1 WHERE id = 1");
+        if (!empty($cacheKey)) {
+            $pdo->prepare("DELETE FROM ai_query_cache WHERE dish_name = ?")->execute([$cacheKey]);
+        }
+    }
+    if (file_exists($cookieVendor)) @unlink($cookieVendor);
+    echo "✓ Temporary test cache entries and cookies purged.\n\n";
+}

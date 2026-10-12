@@ -6,7 +6,8 @@ function handleGetUsers($pdo) {
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
         jsonResponse($users);
     } catch (PDOException $e) {
-        jsonResponse(['error' => 'Failed to fetch users: ' . $e->getMessage()], 500);
+        error_log("handleGetUsers error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to fetch users due to an internal server error.'], 500);
     }
 }
 
@@ -65,9 +66,11 @@ function handleCreateUser($pdo) {
         if ($e->getCode() == 23000) {
             jsonResponse(['error' => 'A user with this email address already exists.'], 409);
         }
-        jsonResponse(['error' => 'Failed to create user: ' . $e->getMessage()], 500);
+        error_log("handleCreateUser PDO error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to create user due to an internal database error.'], 500);
     } catch (Exception $e) {
-        jsonResponse(['error' => $e->getMessage()], 500);
+        error_log("handleCreateUser error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
 
@@ -110,7 +113,8 @@ function handleGetTaxonomy($pdo) {
             'ingredients' => $ingredients
         ]);
     } catch (Exception $e) {
-        jsonResponse(['error' => 'Failed to fetch taxonomy: ' . $e->getMessage()], 500);
+        error_log("handleGetTaxonomy error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to fetch taxonomy due to an internal server error.'], 500);
     }
 }
 
@@ -171,10 +175,12 @@ function handleUpdateIngredient($pdo) {
         ]);
     } catch (PDOException $e) {
         $pdo->rollBack();
-        jsonResponse(['error' => 'Database error: ' . $e->getMessage()], 500);
+        error_log("handleUpdateIngredient PDO error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to update ingredient due to a database error.'], 500);
     } catch (Exception $e) {
         $pdo->rollBack();
-        jsonResponse(['error' => $e->getMessage()], 500);
+        error_log("handleUpdateIngredient error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
 
@@ -189,7 +195,8 @@ function handleGetPendingIngredients($pdo) {
         $queue = $stmt->fetchAll(PDO::FETCH_ASSOC);
         jsonResponse($queue);
     } catch (Exception $e) {
-        jsonResponse(['error' => 'Failed to fetch pending submissions: ' . $e->getMessage()], 500);
+        error_log("handleGetPendingIngredients error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to fetch pending submissions due to an internal server error.'], 500);
     }
 }
 
@@ -309,10 +316,12 @@ function handleResolveSubmission($pdo) {
         }
     } catch (PDOException $e) {
         $pdo->rollBack();
-        jsonResponse(['error' => 'Database error: ' . $e->getMessage()], 500);
+        error_log("handleResolveSubmission PDO error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to resolve submission due to a database error.'], 500);
     } catch (Exception $e) {
         $pdo->rollBack();
-        jsonResponse(['error' => $e->getMessage()], 500);
+        error_log("handleResolveSubmission error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
 
@@ -340,7 +349,8 @@ function handleGetSettings($pdo) {
             ]
         ]);
     } catch (Exception $e) {
-        jsonResponse(['error' => 'Failed to fetch settings: ' . $e->getMessage()], 500);
+        error_log("handleGetSettings error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to fetch settings due to an internal server error.'], 500);
     }
 }
 
@@ -388,7 +398,8 @@ function handleUpdateSettings($pdo) {
             ]
         ]);
     } catch (Exception $e) {
-        jsonResponse(['error' => 'Failed to update settings: ' . $e->getMessage()], 500);
+        error_log("handleUpdateSettings error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to update settings due to an internal server error.'], 500);
     }
 }
 
@@ -482,7 +493,8 @@ function handleGetDashboardMetrics($pdo) {
             ]
         ]);
     } catch (Exception $e) {
-        jsonResponse(['error' => 'Failed to calculate metrics: ' . $e->getMessage()], 500);
+        error_log("handleGetDashboardMetrics error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to calculate metrics due to an internal server error.'], 500);
     }
 }
 

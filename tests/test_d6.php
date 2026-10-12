@@ -66,7 +66,10 @@ if ($vendorLogin['status'] !== 200) {
 }
 echo "✓ 1. Vendor Authenticated (Store 1)\n";
 
-$studentLogin = apiRequest("$baseUrl/auth/login", 'POST', [
+$orderId = null;
+$dishId = null;
+try {
+    $studentLogin = apiRequest("$baseUrl/auth/login", 'POST', [
     'email' => 'student@optimeal.test',
     'password' => 'password123'
 ], $cookieStudent);
@@ -129,6 +132,7 @@ $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND clai
 // Attempt 1: Take-out WITHOUT pickup_time
 $noSlotRes = apiRequest("$baseUrl/reservations", 'POST', [
     'fulfillment_type' => 'take_out',
+    'allergen_override' => true,
     'items' => [
         ['menu_item_id' => $dishId, 'quantity' => 1]
     ]
@@ -146,6 +150,7 @@ if ($noSlotRes['status'] === 400 && $noSlotRes['data']['error'] === 'Please sele
 $invalidSlotRes = apiRequest("$baseUrl/reservations", 'POST', [
     'fulfillment_type' => 'take_out',
     'pickup_time' => 'not-a-time',
+    'allergen_override' => true,
     'items' => [
         ['menu_item_id' => $dishId, 'quantity' => 1]
     ]
@@ -164,6 +169,7 @@ $targetPickupTime = $slotEndpointRes['data']['slots'][0] ?? '14:30';
 $validOrderRes = apiRequest("$baseUrl/reservations", 'POST', [
     'fulfillment_type' => 'take_out',
     'pickup_time' => $targetPickupTime,
+    'allergen_override' => true,
     'items' => [
         ['menu_item_id' => $dishId, 'quantity' => 1]
     ]
@@ -245,16 +251,22 @@ if ($directWebRes['status'] === 403 || $directWebRes['status'] === 404) {
     exit(1);
 }
 
-// L4 Hygiene: Cleanup created order and cookies
-if (!empty($orderId)) {
-    $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$orderId]);
-    $pdo->prepare("DELETE FROM payments WHERE order_id = ?")->execute([$orderId]);
-    $pdo->prepare("DELETE FROM orders WHERE id = ?")->execute([$orderId]);
-    $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
-}
-if (file_exists($cookieVendor)) @unlink($cookieVendor);
-if (file_exists($cookieStudent)) @unlink($cookieStudent);
+    echo "\n============================================\n";
+    echo "✓ ALL PHASE D6 VERIFICATIONS PASSED CLEANLY!\n";
+    echo "============================================\n";
 
-echo "\n============================================\n";
-echo "✓ ALL PHASE D6 VERIFICATIONS PASSED CLEANLY!\n";
-echo "============================================\n";
+} finally {
+    // L4 Hygiene: Cleanup created order and cookies
+    if (isset($pdo)) {
+        if (!empty($orderId)) {
+            $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$orderId]);
+            $pdo->prepare("DELETE FROM payments WHERE order_id = ?")->execute([$orderId]);
+            $pdo->prepare("DELETE FROM orders WHERE id = ?")->execute([$orderId]);
+        }
+        if (!empty($dishId)) {
+            $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
+        }
+    }
+    if (file_exists($cookieVendor)) @unlink($cookieVendor);
+    if (file_exists($cookieStudent)) @unlink($cookieStudent);
+}

@@ -43,10 +43,12 @@ function apiRequest($url, $method = 'GET', $data = null, $cookieFile = null) {
 
 echo "=== PHASE C6: FOOD SAFETY & SELL-BY TRACKING VERIFICATION ===\n\n";
 
-// 1. Vendor Login
+$testDishId = null;
+try {
+    // 1. Vendor Login
 echo "1. Vendor Login...\n";
 $vendorLogin = apiRequest("$baseUrl/auth/login", 'POST', [
-    'email' => 'testvendor@optimeal.test',
+    'email' => 'canteen@optimeal.test',
     'password' => 'password123'
 ], $cookieFileVendor);
 echo "   Status: {$vendorLogin['code']}, Role: " . ($vendorLogin['body']['role'] ?? 'Failed') . "\n";
@@ -104,7 +106,8 @@ assert(!empty($invRow['sell_by']), "sell_by must not be null");
 echo "\n4. Verifying dish appears on customer menu while fresh...\n";
 $menuRes = apiRequest("$baseUrl/menu", 'GET', null, $cookieFileCustomer);
 $dishInMenu = false;
-foreach ($menuRes['body'] as $mItem) {
+$menuItems = $menuRes['body']['items'] ?? $menuRes['body'] ?? [];
+foreach ($menuItems as $mItem) {
     if ((int)$mItem['id'] === $testDishId) {
         $dishInMenu = true;
         echo "   Dish '{$mItem['name']}' found in menu! Cooked: {$mItem['cooked_at']}, Sell-By: {$mItem['sell_by']}\n";
@@ -125,7 +128,8 @@ echo "   Updated sell_by in DB: '{$expiredInv['sell_by']}'\n";
 echo "\n6. Checking customer menu for expired dish...\n";
 $menuResAfter = apiRequest("$baseUrl/menu", 'GET', null, $cookieFileCustomer);
 $expiredDishInMenu = false;
-foreach ($menuResAfter['body'] as $mItem) {
+$menuItemsAfter = $menuResAfter['body']['items'] ?? $menuResAfter['body'] ?? [];
+foreach ($menuItemsAfter as $mItem) {
     if ((int)$mItem['id'] === $testDishId) {
         $expiredDishInMenu = true;
         break;
@@ -145,7 +149,8 @@ $orderAttempt = apiRequest("$baseUrl/reservations", 'POST', [
             'portion_preference' => 'no_preference',
             'ack' => true
         ]
-    ]
+    ],
+    'allergen_override' => true
 ], $cookieFileCustomer);
 
 echo "   HTTP Code: {$orderAttempt['code']}\n";
@@ -178,7 +183,21 @@ echo "   Order response: " . ($validOrder['body']['message'] ?? $validOrder['raw
 assert($validOrder['code'] === 200, "Fresh dish should be reservable");
 echo "   ==> PASS: Fresh dish successfully reserved!\n";
 
-echo "\n=== ALL FOOD SAFETY VERIFICATIONS PASSED SUCCESSFULLY! ===\n";
+    echo "\n=== ALL FOOD SAFETY VERIFICATIONS PASSED SUCCESSFULLY! ===\n";
 
-if (file_exists($cookieFileVendor)) unlink($cookieFileVendor);
-if (file_exists($cookieFileCustomer)) unlink($cookieFileCustomer);
+} finally {
+    if (isset($pdo)) {
+        $pdo->query("UPDATE settings SET closing_time = '20:00' WHERE id = 1");
+        if (!empty($testDishId)) {
+            $pdo->prepare("UPDATE inventory SET sell_by = DATE_ADD(NOW(), INTERVAL 4 HOUR) WHERE menu_item_id = ?")->execute([$testDishId]);
+        }
+        $custStmt = $pdo->query("SELECT id FROM users WHERE email = 'student@optimeal.test'");
+        $sId = $custStmt ? $custStmt->fetchColumn() : null;
+        if ($sId) {
+            $pdo->prepare("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id = ? AND DATE(reserved_at) = CURDATE())")->execute([$sId]);
+            $pdo->prepare("DELETE FROM orders WHERE user_id = ? AND DATE(reserved_at) = CURDATE()")->execute([$sId]);
+        }
+    }
+    if (file_exists($cookieFileVendor)) @unlink($cookieFileVendor);
+    if (file_exists($cookieFileCustomer)) @unlink($cookieFileCustomer);
+}

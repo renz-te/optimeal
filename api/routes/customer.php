@@ -17,6 +17,7 @@ function getCustomerSettings($pdo) {
 
 function expireUnclaimedOrdersAfterClosing($pdo) {
     try {
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare("SELECT id FROM orders WHERE status = 'reserved'");
         $stmt->execute();
         $expired_orders = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -48,8 +49,12 @@ function expireUnclaimedOrdersAfterClosing($pdo) {
                 $refundClaim->execute([$item['quantity'], $item['menu_item_id'], $item['order_id']]);
             }
         }
+        $pdo->commit();
     } catch (Exception $e) {
-        // Log/ignore silently to not break flow
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("expireUnclaimedOrdersAfterClosing error: " . $e->getMessage());
     }
 }
 
@@ -627,18 +632,18 @@ function handleCreateReservation($pdo) {
             $availableQty = $itemData ? max(0, (int)$itemData['online_pool_qty']) : 0;
 
             if (!$itemData || $availableQty < $qty) {
-                throw new Exception("Out of stock: Only {$availableQty} portions of {$dishName} remaining.", 400);
+                throw new BusinessException("Out of stock: Only {$availableQty} portions of {$dishName} remaining.", 400);
             }
 
             // Food Safety Enforcement: Check sell_by in Asia/Manila
             if (!empty($itemData['sell_by'])) {
                 $sellByDateTime = new DateTime($itemData['sell_by'], $tz);
                 if ($now >= $sellByDateTime) {
-                    throw new Exception("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.", 422);
+                    throw new BusinessException("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.", 422);
                 }
                 // Pickup time must be <= sell_by of all requested items
                 if ($fulfillment_type === 'take_out' && $pickupDateTime && $pickupDateTime > $sellByDateTime) {
-                    throw new Exception("Pickup time ({$pickup_time}) exceeds safe sell-by time for '{$dishName}' ({$itemData['sell_by']}).", 422);
+                    throw new BusinessException("Pickup time ({$pickup_time}) exceeds safe sell-by time for '{$dishName}' ({$itemData['sell_by']}).", 422);
                 }
             }
 
@@ -655,7 +660,7 @@ function handleCreateReservation($pdo) {
                 $claimed = $checkClaims->fetchColumn() ?: 0;
                 $maxDiscountQty = isset($settings['max_discount_qty']) ? (int)$settings['max_discount_qty'] : 5;
                 if ($claimed + $qty > $maxDiscountQty) {
-                    throw new Exception("Daily discount claim limit exceeded for item $item_id", 422);
+                    throw new BusinessException("Daily discount claim limit exceeded for item $item_id", 422);
                 }
                 $upsertClaims->execute([$user_id, $item_id, $qty, $qty]);
             }
@@ -678,7 +683,7 @@ function handleCreateReservation($pdo) {
 
             $updateInventory->execute([$qty, $qty, $item_id, $qty]);
             if ($updateInventory->rowCount() === 0) {
-                throw new Exception("Out of stock: Only 0 portions of {$dishName} remaining.", 400);
+                throw new BusinessException("Out of stock: Only 0 portions of {$dishName} remaining.", 400);
             }
         }
 
@@ -686,12 +691,18 @@ function handleCreateReservation($pdo) {
         
         $pdo->commit();
         jsonResponse(['message' => 'Reservation created', 'order_id' => $order_id, 'total_amount' => $total_amount, 'claim_token' => $claimToken]);
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 422;
+        jsonResponse(['error' => $e->getMessage()], $code);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        $code = ($e->getCode() >= 400 && $e->getCode() < 600) ? (int)$e->getCode() : 422;
-        jsonResponse(['error' => $e->getMessage()], $code);
+        error_log("handleCreateReservation error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
 
@@ -708,13 +719,13 @@ function handlePayReservation($pdo, $order_id) {
         $order = $stmt->fetch();
 
         if (!$order) {
-            throw new Exception("Order not found");
+            throw new BusinessException("Order not found", 404);
         }
         if ($order['status'] !== 'reserved') {
-            throw new Exception("Order is not in reserved status");
+            throw new BusinessException("Order is not in reserved status", 400);
         }
         if (new DateTime() > new DateTime($order['ttl_expires_at'])) {
-            throw new Exception("Reservation expired");
+            throw new BusinessException("Reservation expired", 400);
         }
 
         $updateOrder = $pdo->prepare("UPDATE orders SET status = 'paid' WHERE id = ?");
@@ -725,9 +736,18 @@ function handlePayReservation($pdo, $order_id) {
 
         $pdo->commit();
         jsonResponse(['message' => 'Payment successful', 'claim_token' => $order['claim_token']]);
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
     } catch (Exception $e) {
-        $pdo->rollBack();
-        jsonResponse(['error' => $e->getMessage()], 400);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handlePayReservation error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
 
@@ -790,18 +810,102 @@ function handleUpdateFulfillment($pdo) {
         jsonResponse(['error' => 'Missing token or fulfillment_type'], 400);
     }
 
-    $fulfillment_type = in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
-        ? $input['fulfillment_type'] 
-        : 'dine_in';
+    try {
+        $fulfillment_type = $input['fulfillment_type'];
+        if (!in_array($fulfillment_type, ['take_out', 'dine_in'], true)) {
+            throw new BusinessException('Invalid fulfillment type', 400);
+        }
 
-    $stmt = $pdo->prepare("UPDATE orders SET fulfillment_type = ? WHERE claim_token = ? AND user_id = ?");
-    $stmt->execute([$fulfillment_type, $input['token'], $user_id]);
+        $stmt = $pdo->prepare("SELECT id, status, store_id, reserved_at FROM orders WHERE claim_token = ? AND user_id = ?");
+        $stmt->execute([$input['token'], $user_id]);
+        $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($stmt->rowCount() === 0) {
-        jsonResponse(['error' => 'Order not found or unauthorized'], 404);
+        if (!$order) {
+            throw new BusinessException('Order not found or unauthorized', 404);
+        }
+
+        if ($order['status'] !== 'reserved') {
+            throw new BusinessException('Fulfillment type can only be updated while order is in reserved status', 400);
+        }
+
+        date_default_timezone_set('Asia/Manila');
+        $tz = new DateTimeZone('Asia/Manila');
+        $now = new DateTime('now', $tz);
+
+        if ($fulfillment_type === 'take_out') {
+            $pickup_time = !empty($input['pickup_time']) ? trim($input['pickup_time']) : null;
+            if (empty($pickup_time)) {
+                throw new BusinessException('Please select a pickup time slot for take-out orders.', 400);
+            }
+            if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $pickup_time)) {
+                throw new BusinessException('Invalid pickup time format. Must be HH:MM.', 400);
+            }
+
+            $settings = getCustomerSettings($pdo);
+            $closingTime = $settings['closing_time'] ?? '20:00';
+            $openingTime = $settings['opening_time'] ?? '06:00';
+
+            // Validate that pickup_time is present in generatePickupSlots output
+            $availableSlots = generatePickupSlots($closingTime, 'now', $openingTime);
+            if (!in_array($pickup_time, $availableSlots, true)) {
+                throw new BusinessException('Selected pickup time slot is not available or past cafeteria hours.', 422);
+            }
+
+            // Validate pickup_time >= NOW()
+            $pickupDateTime = new DateTime($now->format('Y-m-d') . ' ' . $pickup_time, $tz);
+            if ($pickupDateTime < $now) {
+                throw new BusinessException('Pickup time must be in the future.', 422);
+            }
+
+            // Validate pickup_time <= sell_by of all items in this order
+            $stmtItems = $pdo->prepare("
+                SELECT m.name, i.sell_by
+                FROM order_items oi
+                JOIN menu_items m ON oi.menu_item_id = m.id
+                LEFT JOIN inventory i ON m.id = i.menu_item_id
+                WHERE oi.order_id = ?
+            ");
+            $stmtItems->execute([$order['id']]);
+            $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($orderItems as $item) {
+                if (!empty($item['sell_by'])) {
+                    $sellByDateTime = new DateTime($item['sell_by'], $tz);
+                    if ($now >= $sellByDateTime) {
+                        throw new BusinessException("Food safety violation: Item '{$item['name']}' has passed its safe sell-by expiration time ({$item['sell_by']}) and cannot be ordered.", 422);
+                    }
+                    if ($pickupDateTime > $sellByDateTime) {
+                        throw new BusinessException("Pickup time ({$pickup_time}) exceeds safe sell-by time for '{$item['name']}' ({$item['sell_by']}).", 422);
+                    }
+                }
+            }
+
+            // Recalculate expiry time as max(standard_ttl_time, pickup_slot_time), capped at closing_time
+            $reservationTtl = isset($settings['reservation_ttl']) ? max(1, (int)$settings['reservation_ttl']) : 30;
+            $standardTtlTime = (clone $now)->modify("+{$reservationTtl} minutes");
+            $expiryTime = ($pickupDateTime > $standardTtlTime) ? clone $pickupDateTime : clone $standardTtlTime;
+            $closingDateTime = new DateTime($now->format('Y-m-d') . ' ' . $closingTime, $tz);
+            if ($expiryTime > $closingDateTime) {
+                $expiryTime = clone $closingDateTime;
+            }
+            $expiryTimeFormatted = $expiryTime->format('Y-m-d H:i:s');
+
+            $updateStmt = $pdo->prepare("UPDATE orders SET fulfillment_type = 'take_out', pickup_time = ?, ttl_expires_at = ? WHERE id = ?");
+            $updateStmt->execute([$pickup_time, $expiryTimeFormatted, $order['id']]);
+        } else {
+            // dine_in
+            $updateStmt = $pdo->prepare("UPDATE orders SET fulfillment_type = 'dine_in', pickup_time = NULL WHERE id = ?");
+            $updateStmt->execute([$order['id']]);
+        }
+
+        jsonResponse(['message' => 'Fulfillment type updated successfully']);
+    } catch (BusinessException $e) {
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
+    } catch (Exception $e) {
+        error_log("handleUpdateFulfillment error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
-
-    jsonResponse(['message' => 'Fulfillment type updated successfully']);
 }
 
 function handleGetProfile($pdo) {
@@ -893,7 +997,8 @@ function handleUpdateProfile($pdo) {
             ]
         ]);
     } catch (PDOException $e) {
-        jsonResponse(['error' => 'Database error: ' . $e->getMessage()], 500);
+        error_log("handleUpdateProfile error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected database error occurred.'], 500);
     }
 }
 

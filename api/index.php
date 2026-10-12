@@ -50,16 +50,18 @@ function requireStudent($pdo) {
 function requireStaff($pdo) {
     requireRole($pdo, ['vendor', 'admin']);
 
-    $stmt = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
-    $storeId = $stmt->fetchColumn();
-    if (!$storeId) {
-        $stmt = $pdo->query("SELECT id FROM stores LIMIT 1");
-        $storeId = $stmt->fetchColumn();
-    }
-    if (!$storeId) {
+    $stmt = $pdo->prepare("SELECT id FROM stores WHERE vendor_user_id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    $store = $stmt->fetch();
+    if (!$store) {
+        $stmtActive = $pdo->query("SELECT id FROM stores WHERE is_active = 1 LIMIT 1");
+        $storeId = $stmtActive->fetchColumn();
+        if ($storeId) {
+            return (int)$storeId;
+        }
         jsonResponse(['error' => 'No active cafeteria store found.'], 500);
     }
-    return (int)$storeId;
+    return (int)$store['id'];
 }
 
 

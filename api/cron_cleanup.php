@@ -1,4 +1,5 @@
 <?php
+if (php_sapi_name() !== 'cli') { http_response_code(404); exit; }
 require_once __DIR__ . '/db.php';
 
 echo "Running TTL cleanup script...\n";

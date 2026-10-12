@@ -64,7 +64,11 @@ if ($vendorLogin['status'] !== 200) {
 }
 echo "✓ 1. Vendor Authenticated (Store 1)\n";
 
-// 2. Authenticate Student
+$origClosing = null;
+$createdOrderIds = [];
+$dishId = null;
+try {
+    // 2. Authenticate Student
 $studentLogin = apiRequest("$baseUrl/auth/login", 'POST', [
     'email' => 'student@optimeal.test',
     'password' => 'password123'
@@ -264,20 +268,30 @@ if ($directWebRes['status'] === 403 || $directWebRes['status'] === 404) {
     exit(1);
 }
 
-// L4 Hygiene & Restore Settings
-if ($origClosing) {
-    $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
-}
-if (!empty($createdOrderIds)) {
-    $inOrd = implode(',', $createdOrderIds);
-    $pdo->exec("DELETE FROM order_items WHERE order_id IN ($inOrd)");
-    $pdo->exec("DELETE FROM payments WHERE order_id IN ($inOrd)");
-    $pdo->exec("DELETE FROM orders WHERE id IN ($inOrd)");
-    $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
-}
-if (file_exists($cookieVendor)) @unlink($cookieVendor);
-if (file_exists($cookieStudent)) @unlink($cookieStudent);
+    echo "\n============================================\n";
+    echo "✓ ALL PHASE D5 VERIFICATIONS PASSED CLEANLY!\n";
+    echo "============================================\n";
 
-echo "\n============================================\n";
-echo "✓ ALL PHASE D5 VERIFICATIONS PASSED CLEANLY!\n";
-echo "============================================\n";
+} finally {
+    // L4 Hygiene & Restore Settings
+    if (isset($pdo)) {
+        if (!empty($origClosing)) {
+            $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
+        }
+        if (!empty($createdOrderIds)) {
+            $inOrd = implode(',', $createdOrderIds);
+            $pdo->exec("DELETE FROM order_items WHERE order_id IN ($inOrd)");
+            $pdo->exec("DELETE FROM payments WHERE order_id IN ($inOrd)");
+            $pdo->exec("DELETE FROM orders WHERE id IN ($inOrd)");
+        }
+        if (!empty($dishId)) {
+            $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
+            $pdo->exec("DELETE FROM recipe_ingredients WHERE recipe_id IN (SELECT id FROM recipes WHERE menu_item_id = $dishId)");
+            $pdo->exec("DELETE FROM recipes WHERE menu_item_id = $dishId");
+            $pdo->exec("DELETE FROM inventory WHERE menu_item_id = $dishId");
+            $pdo->exec("DELETE FROM menu_items WHERE id = $dishId");
+        }
+    }
+    if (file_exists($cookieVendor)) @unlink($cookieVendor);
+    if (file_exists($cookieStudent)) @unlink($cookieStudent);
+}
