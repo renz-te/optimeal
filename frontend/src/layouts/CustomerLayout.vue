@@ -31,6 +31,24 @@
       </div>
     </nav>
     <main class="max-w-6xl mx-auto p-4">
+      <!-- Global Announcement Banner -->
+      <div 
+        v-if="globalAnnouncement && !isAnnouncementDismissed" 
+        class="bg-amber-500 text-slate-950 px-5 py-3 shadow-sm flex items-center justify-between rounded-2xl mb-6 border border-amber-600/30 text-sm font-bold"
+      >
+        <div class="flex items-center space-x-3">
+          <Megaphone :size="18" class="text-slate-950 shrink-0 animate-pulse" />
+          <span>{{ globalAnnouncement }}</span>
+        </div>
+        <button 
+          @click="dismissAnnouncement" 
+          class="p-1 hover:bg-amber-600/30 rounded-lg transition-colors text-slate-950 ml-3 shrink-0" 
+          title="Dismiss announcement"
+        >
+          <X :size="16" />
+        </button>
+      </div>
+
       <router-view></router-view>
     </main>
   </div>
@@ -39,12 +57,40 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, ShoppingBag, Clock } from 'lucide-vue-next'
+import { User, ShoppingBag, Clock, Megaphone, X } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
 
 const { exitSandbox, clearSandbox } = useSandbox()
 const router = useRouter()
 const user = ref(null)
+
+const globalAnnouncement = ref('')
+const isAnnouncementDismissed = ref(false)
+
+const fetchAnnouncement = async () => {
+  try {
+    const res = await fetch('/api/announcement')
+    if (res.ok) {
+      const data = await res.json()
+      globalAnnouncement.value = data.global_announcement || ''
+      const dismissed = localStorage.getItem('optimeal_dismissed_announcement')
+      if (dismissed === globalAnnouncement.value) {
+        isAnnouncementDismissed.value = true
+      } else {
+        isAnnouncementDismissed.value = false
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch announcement', e)
+  }
+}
+
+const dismissAnnouncement = () => {
+  isAnnouncementDismissed.value = true
+  if (globalAnnouncement.value) {
+    localStorage.setItem('optimeal_dismissed_announcement', globalAnnouncement.value)
+  }
+}
 
 const checkAuth = () => {
   const data = localStorage.getItem('optimeal_user')
@@ -69,6 +115,7 @@ const logout = () => {
 onMounted(() => {
   checkAuth()
   window.addEventListener('auth-change', checkAuth)
+  fetchAnnouncement()
 })
 
 onUnmounted(() => {

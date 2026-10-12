@@ -327,12 +327,12 @@ function handleResolveSubmission($pdo) {
 
 function handleGetSettings($pdo) {
     try {
-        $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
+        $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement, updated_at FROM settings WHERE id = 1");
         $settings = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$settings) {
             $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, 30, '07:00', '20:00', 5, 10.00, 1)");
-            $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
+            $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement, updated_at FROM settings WHERE id = 1");
             $settings = $stmt->fetch(PDO::FETCH_ASSOC);
         }
 
@@ -345,6 +345,7 @@ function handleGetSettings($pdo) {
                 'max_discount_qty' => (int)$settings['max_discount_qty'],
                 'default_decay_rate' => (float)$settings['default_decay_rate'],
                 'ai_enabled' => (bool)$settings['ai_enabled'],
+                'global_announcement' => $settings['global_announcement'] ?? null,
                 'updated_at' => $settings['updated_at']
             ]
         ]);
@@ -367,21 +368,33 @@ function handleUpdateSettings($pdo) {
     $maxDiscountQty = isset($input['max_discount_qty']) ? max(0, (int)$input['max_discount_qty']) : ($current ? (int)$current['max_discount_qty'] : 5);
     $aiEnabled = isset($input['ai_enabled']) ? ($input['ai_enabled'] ? 1 : 0) : ($current ? (int)$current['ai_enabled'] : 1);
 
+    $globalAnnouncement = $current ? ($current['global_announcement'] ?? null) : null;
+    if (array_key_exists('global_announcement', $input)) {
+        if ($input['global_announcement'] === null || trim($input['global_announcement']) === '') {
+            $globalAnnouncement = null;
+        } else {
+            $globalAnnouncement = trim($input['global_announcement']);
+            if (mb_strlen($globalAnnouncement) > 255) {
+                $globalAnnouncement = mb_substr($globalAnnouncement, 0, 255);
+            }
+        }
+    }
+
     try {
         $stmt = $pdo->prepare("
             UPDATE settings 
-            SET reservation_ttl = ?, opening_time = ?, max_discount_qty = ?, ai_enabled = ? 
+            SET reservation_ttl = ?, opening_time = ?, max_discount_qty = ?, ai_enabled = ?, global_announcement = ? 
             WHERE id = 1
         ");
-        $stmt->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled]);
+        $stmt->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled, $globalAnnouncement]);
 
         // If no row updated, ensure row 1 exists
         if ($stmt->rowCount() === 0 && !$current) {
-            $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, ?, ?, '20:00', ?, 10.00, ?)");
-            $ins->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled]);
+            $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement) VALUES (1, ?, ?, '20:00', ?, 10.00, ?, ?)");
+            $ins->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled, $globalAnnouncement]);
         }
 
-        $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, updated_at FROM settings WHERE id = 1");
+        $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement, updated_at FROM settings WHERE id = 1");
         $updated = $fetchStmt->fetch(PDO::FETCH_ASSOC);
 
         jsonResponse([
@@ -394,12 +407,26 @@ function handleUpdateSettings($pdo) {
                 'max_discount_qty' => (int)$updated['max_discount_qty'],
                 'default_decay_rate' => (float)$updated['default_decay_rate'],
                 'ai_enabled' => (bool)$updated['ai_enabled'],
+                'global_announcement' => $updated['global_announcement'] ?? null,
                 'updated_at' => $updated['updated_at']
             ]
         ]);
     } catch (Exception $e) {
         error_log("handleUpdateSettings error: " . $e->getMessage());
         jsonResponse(['error' => 'Failed to update settings due to an internal server error.'], 500);
+    }
+}
+
+function handleGetAnnouncement($pdo) {
+    try {
+        $stmt = $pdo->query("SELECT global_announcement FROM settings WHERE id = 1");
+        $announcement = $stmt ? $stmt->fetchColumn() : null;
+        jsonResponse([
+            'global_announcement' => $announcement ?: null
+        ]);
+    } catch (Exception $e) {
+        error_log("handleGetAnnouncement error: " . $e->getMessage());
+        jsonResponse(['global_announcement' => null]);
     }
 }
 

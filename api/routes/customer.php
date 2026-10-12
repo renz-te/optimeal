@@ -147,6 +147,7 @@ function handleGetMenu($pdo) {
             'opening_time' => $openingTime,
             'closing_time' => $closingTime,
             'is_open' => false,
+            'global_announcement' => $settings['global_announcement'] ?? null,
             'items' => []
         ]);
     }
@@ -312,6 +313,7 @@ function handleGetMenu($pdo) {
         'opening_time' => $openingTime,
         'closing_time' => $closingTime,
         'is_open' => true,
+        'global_announcement' => $settings['global_announcement'] ?? null,
         'items' => $result
     ]);
 }

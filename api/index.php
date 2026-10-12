@@ -223,6 +223,9 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleGetDashboardMetrics($pdo);
+} elseif ($route === '/announcement' && $method === 'GET') {
+    require 'routes/admin.php';
+    handleGetAnnouncement($pdo);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }

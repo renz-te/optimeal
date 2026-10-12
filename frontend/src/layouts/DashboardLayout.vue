@@ -1,6 +1,5 @@
 <template>
   <div class="flex h-screen bg-slate-100 font-sans antialiased text-slate-900 overflow-hidden">
-    <AdminSimulationBar :user-role="role" />
     <!-- Desktop Sidebar -->
     <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full flex-shrink-0 relative z-20 shadow-xl">
       <div class="p-6">
@@ -12,6 +11,9 @@
         <template v-if="displayRole === 'admin'">
           <router-link to="/admin/dashboard" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <LayoutDashboard :size="18" /><span>Overview</span>
+          </router-link>
+          <router-link v-if="role === 'admin'" to="/admin/users" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
+            <Users :size="18" /><span>User Management</span>
           </router-link>
           <router-link to="/admin/taxonomy" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <ListTree :size="18" /><span>Allergen Taxonomy</span>
@@ -56,6 +58,24 @@
     
     <!-- Main Content -->
     <main class="flex-1 overflow-auto bg-slate-50 relative z-10 flex flex-col h-full">
+      <!-- Global Announcement Banner -->
+      <div 
+        v-if="globalAnnouncement && !isAnnouncementDismissed" 
+        class="bg-amber-500 text-slate-950 px-6 py-2.5 shadow-sm flex items-center justify-between border-b border-amber-600/30 text-sm font-bold z-30 shrink-0"
+      >
+        <div class="flex items-center space-x-2.5">
+          <Megaphone :size="18" class="text-slate-950 shrink-0 animate-pulse" />
+          <span>{{ globalAnnouncement }}</span>
+        </div>
+        <button 
+          @click="dismissAnnouncement" 
+          class="p-1 hover:bg-amber-600/30 rounded-lg transition-colors text-slate-950" 
+          title="Dismiss announcement"
+        >
+          <X :size="16" />
+        </button>
+      </div>
+
       <router-view></router-view>
     </main>
   </div>
@@ -64,15 +84,55 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { LayoutDashboard, Store, Tags, ListTree, Users, ListOrdered, Utensils, Coins, LineChart, LogOut } from 'lucide-vue-next'
+import {
+  LayoutDashboard,
+  Store,
+  Tags,
+  ListTree,
+  Users,
+  ListOrdered,
+  Utensils,
+  Coins,
+  LineChart,
+  LogOut,
+  Megaphone,
+  X
+} from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
-import AdminSimulationBar from '../components/AdminSimulationBar.vue'
 
 const router = useRouter()
 const { activePreviewMode, clearSandbox } = useSandbox()
 const role = ref('vendor')
 const userName = ref('')
 const userEmail = ref('')
+
+const globalAnnouncement = ref('')
+const isAnnouncementDismissed = ref(false)
+
+const fetchAnnouncement = async () => {
+  try {
+    const res = await fetch('/api/announcement')
+    if (res.ok) {
+      const data = await res.json()
+      globalAnnouncement.value = data.global_announcement || ''
+      const dismissed = localStorage.getItem('optimeal_dismissed_announcement')
+      if (dismissed === globalAnnouncement.value) {
+        isAnnouncementDismissed.value = true
+      } else {
+        isAnnouncementDismissed.value = false
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch announcement', e)
+  }
+}
+
+const dismissAnnouncement = () => {
+  isAnnouncementDismissed.value = true
+  if (globalAnnouncement.value) {
+    localStorage.setItem('optimeal_dismissed_announcement', globalAnnouncement.value)
+  }
+}
 
 const displayRole = computed(() => {
   if (role.value === 'admin' && activePreviewMode.value === 'vendor') return 'vendor'
@@ -91,6 +151,8 @@ onMounted(() => {
   } else {
     router.push('/customer/login')
   }
+
+  fetchAnnouncement()
 })
 
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())

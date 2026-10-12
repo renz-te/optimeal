@@ -252,6 +252,76 @@
       </div>
     </div>
 
+    <!-- Global Announcement Banner Management (Task 4) -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+      <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-amber-100 text-amber-800 rounded-xl">
+            <Megaphone :size="20" />
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Global Announcement Banner</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Broadcast an urgent notification displayed across all student and vendor screens.</p>
+          </div>
+        </div>
+
+        <span v-if="settingsForm.global_announcement" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+          Active Broadcast
+        </span>
+        <span v-else class="text-xs font-medium text-slate-400">
+          No announcement active
+        </span>
+      </div>
+
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-600 mb-1.5 flex items-center justify-between">
+            <span>Announcement Message</span>
+            <span class="text-xs font-mono font-semibold" :class="announcementText.length >= 190 ? 'text-rose-600 font-bold' : 'text-slate-400'">
+              {{ announcementText.length }}/200
+            </span>
+          </label>
+          <input
+            id="announcement-input"
+            v-model="announcementText"
+            type="text"
+            maxlength="200"
+            placeholder="e.g. Cafeteria will close at 18:00 today for disinfection. Please claim reservations early."
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none text-sm font-medium text-slate-800 bg-white"
+          />
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <p class="text-xs text-slate-500">
+            Visible at the top of customer menu and vendor portal until dismissed or cleared.
+          </p>
+
+          <div class="flex items-center gap-3">
+            <button
+              v-if="settingsForm.global_announcement"
+              type="button"
+              @click="handleClearAnnouncement"
+              :disabled="savingAnnouncement"
+              class="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors disabled:opacity-50"
+            >
+              Clear Banner
+            </button>
+            <button
+              id="btn-publish-announcement"
+              type="button"
+              @click="handlePublishAnnouncement"
+              :disabled="savingAnnouncement || announcementText.trim() === (settingsForm.global_announcement || '')"
+              class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <Megaphone :size="14" />
+              <span>{{ savingAnnouncement ? 'Publishing...' : 'Publish Announcement' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Global Operating Configuration Form -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -390,13 +460,16 @@ import {
   Clock,
   Sliders,
   Save,
-  Sparkles
+  Sparkles,
+  Megaphone
 } from 'lucide-vue-next'
 
 const loadingMetrics = ref(false)
 const loadingSettings = ref(false)
 const savingSettings = ref(false)
+const savingAnnouncement = ref(false)
 const togglingAi = ref(false)
+const announcementText = ref('')
 const pageError = ref('')
 const settingsError = ref('')
 const successMessage = ref('')
@@ -416,6 +489,7 @@ const settingsForm = reactive({
   closing_time: '20:00',
   max_discount_qty: 5,
   ai_enabled: true,
+  global_announcement: null,
   updated_at: ''
 })
 
@@ -446,6 +520,7 @@ const fetchSettings = async () => {
     }
     if (data.settings) {
       Object.assign(settingsForm, data.settings)
+      announcementText.value = data.settings.global_announcement || ''
     }
   } catch (err) {
     console.error('Error fetching settings:', err)
@@ -540,6 +615,72 @@ const handleSaveSettings = async () => {
     settingsError.value = err.message
   } finally {
     savingSettings.value = false
+  }
+}
+
+const handlePublishAnnouncement = async () => {
+  savingAnnouncement.value = true
+  pageError.value = ''
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        global_announcement: announcementText.value.trim()
+      })
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to publish announcement.')
+    }
+
+    if (data.settings) {
+      Object.assign(settingsForm, data.settings)
+      announcementText.value = data.settings.global_announcement || ''
+    }
+
+    successMessage.value = 'Global announcement published successfully!'
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 4000)
+  } catch (err) {
+    pageError.value = err.message
+  } finally {
+    savingAnnouncement.value = false
+  }
+}
+
+const handleClearAnnouncement = async () => {
+  savingAnnouncement.value = true
+  pageError.value = ''
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        global_announcement: ''
+      })
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to clear announcement.')
+    }
+
+    if (data.settings) {
+      Object.assign(settingsForm, data.settings)
+      announcementText.value = ''
+    }
+
+    successMessage.value = 'Global announcement cleared.'
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 4000)
+  } catch (err) {
+    pageError.value = err.message
+  } finally {
+    savingAnnouncement.value = false
   }
 }
 </script>
