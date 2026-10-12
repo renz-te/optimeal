@@ -846,8 +846,77 @@ function handleLaunchMenu($pdo) {
     }
 }
 
+/**
+ * R1: Computes today's active reservations (status 'reserved' or 'paid') for a vendor's store,
+ * grouped by menu_item_id and pickup_time slot (ordered sequentially earliest first).
+ */
+function getStoreTodayReservationsMap($pdo, $store_id) {
+    $stmt = $pdo->prepare("
+        SELECT oi.menu_item_id,
+               COALESCE(NULLIF(TRIM(o.pickup_time), ''), 'Dine-In/Walk-in') AS slot,
+               COUNT(DISTINCT o.id) AS order_count,
+               SUM(oi.quantity) AS total_qty
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.store_id = ?
+          AND o.status IN ('reserved', 'paid')
+          AND DATE(COALESCE(o.reserved_at, NOW())) = CURDATE()
+        GROUP BY oi.menu_item_id, slot
+    ");
+    $stmt->execute([$store_id]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $map = [];
+    foreach ($rows as $r) {
+        $mid = (int)$r['menu_item_id'];
+        if (!isset($map[$mid])) {
+            $map[$mid] = [
+                'reserved_qty' => 0,
+                'pickup_slots' => [],
+                'slots_summary' => ''
+            ];
+        }
+        $qty = (int)$r['total_qty'];
+        $orderCount = (int)$r['order_count'];
+        $slotName = $r['slot'];
+
+        $map[$mid]['reserved_qty'] += $qty;
+        $map[$mid]['pickup_slots'][] = [
+            'slot' => $slotName,
+            'orders' => $orderCount,
+            'qty' => $qty
+        ];
+    }
+
+    foreach ($map as $mid => &$data) {
+        // Sort sequentially: time formats (e.g. '11:30', '14:15') earliest first, then non-time slots like 'Dine-In/Walk-in'
+        usort($data['pickup_slots'], function ($a, $b) {
+            $aSlot = $a['slot'];
+            $bSlot = $b['slot'];
+            $aIsTime = preg_match('/^\d{1,2}:\d{2}/', $aSlot);
+            $bIsTime = preg_match('/^\d{1,2}:\d{2}/', $bSlot);
+            if ($aIsTime && $bIsTime) {
+                return strcmp($aSlot, $bSlot);
+            }
+            if ($aIsTime && !$bIsTime) return -1;
+            if (!$aIsTime && $bIsTime) return 1;
+            return strcmp($aSlot, $bSlot);
+        });
+
+        $summaryParts = [];
+        foreach ($data['pickup_slots'] as $s) {
+            $summaryParts[] = $s['slot'] . ' - ' . $s['orders'] . ' ' . ($s['orders'] === 1 ? 'order' : 'orders');
+        }
+        $data['slots_summary'] = implode(', ', $summaryParts);
+    }
+    unset($data);
+
+    return $map;
+}
+
 function handleGetVendorMenu($pdo) {
     $store_id = requireVendor($pdo);
+    $reservationsMap = getStoreTodayReservationsMap($pdo, $store_id);
 
     $stmt = $pdo->prepare("
         SELECT m.id, m.store_id, m.name, m.description, m.category, m.dietary, 
@@ -914,6 +983,12 @@ function handleGetVendorMenu($pdo) {
             ];
         }
 
+        $resData = $reservationsMap[$item['id']] ?? [
+            'reserved_qty' => 0,
+            'pickup_slots' => [],
+            'slots_summary' => ''
+        ];
+
         $result[] = [
             'id' => (int)$item['id'],
             'name' => $item['name'],
@@ -931,7 +1006,10 @@ function handleGetVendorMenu($pdo) {
             'ingredients' => $ingredients,
             'allergens' => $allergens,
             'sensitivities' => $sensitivities,
-            'macros' => $macros
+            'macros' => $macros,
+            'reserved_qty' => (int)$resData['reserved_qty'],
+            'pickup_slots' => $resData['pickup_slots'],
+            'slots_summary' => $resData['slots_summary']
         ];
     }
 
@@ -1929,6 +2007,7 @@ RULES:
 
 function handleGetPrepPlan($pdo) {
     $store_id = requireVendor($pdo);
+    $reservationsMap = getStoreTodayReservationsMap($pdo, $store_id);
 
     $requestedItems = [];
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -1961,6 +2040,7 @@ function handleGetPrepPlan($pdo) {
     $dishesBreakdown = [];
     $needsRecipe = [];
     $totalPlannedServings = 0;
+    $totalCookServings = 0;
 
     foreach ($requestedItems as $req) {
         $menuItemId = (int)($req['menu_item_id'] ?? 0);
@@ -1972,6 +2052,14 @@ function handleGetPrepPlan($pdo) {
         $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
         if (!$dish) continue;
 
+        $resData = $reservationsMap[$menuItemId] ?? [
+            'reserved_qty' => 0,
+            'pickup_slots' => [],
+            'slots_summary' => ''
+        ];
+        $reservedQty = (int)$resData['reserved_qty'];
+        $cookServings = max($plannedServings, $reservedQty);
+
         $stmtRecipe = $pdo->prepare("SELECT * FROM recipes WHERE menu_item_id = ?");
         $stmtRecipe->execute([$menuItemId]);
         $recipe = $stmtRecipe->fetch(PDO::FETCH_ASSOC);
@@ -1981,14 +2069,19 @@ function handleGetPrepPlan($pdo) {
             $needsRecipe[] = [
                 'menu_item_id' => $menuItemId,
                 'name' => $dish['name'],
-                'planned_servings' => $plannedServings
+                'planned_servings' => $plannedServings,
+                'reserved_qty' => $reservedQty,
+                'cook_servings' => $cookServings,
+                'pickup_slots' => $resData['pickup_slots'],
+                'slots_summary' => $resData['slots_summary']
             ];
             continue;
         }
 
         $totalPlannedServings += $plannedServings;
+        $totalCookServings += $cookServings;
         $yieldServings = max(1, (int)$recipe['yield_servings']);
-        $scaleFactor = (float)$plannedServings / (float)$yieldServings;
+        $scaleFactor = (float)$cookServings / (float)$yieldServings;
 
         $stmtIngs = $pdo->prepare("
             SELECT ri.*, i.name as canonical_name
@@ -2003,6 +2096,10 @@ function handleGetPrepPlan($pdo) {
             'menu_item_id' => $menuItemId,
             'name' => $dish['name'],
             'planned_servings' => $plannedServings,
+            'reserved_qty' => $reservedQty,
+            'cook_servings' => $cookServings,
+            'pickup_slots' => $resData['pickup_slots'],
+            'slots_summary' => $resData['slots_summary'],
             'yield_servings' => $yieldServings,
             'scale_factor' => round($scaleFactor, 2),
             'has_recipe' => true
@@ -2057,7 +2154,8 @@ function handleGetPrepPlan($pdo) {
             }
             $combinedMap[$key]['dishes'][] = [
                 'dish_name' => $dish['name'],
-                'servings' => $plannedServings,
+                'servings' => $cookServings,
+                'planned_servings' => $plannedServings,
                 'scaled_qty' => round($scaledQty, 2),
                 'unit' => $unit
             ];
@@ -2115,7 +2213,9 @@ function handleGetPrepPlan($pdo) {
 
     jsonResponse([
         'total_dishes' => count($dishesBreakdown),
-        'total_servings' => $totalPlannedServings,
+        'total_servings' => $totalCookServings,
+        'total_planned_servings' => $totalPlannedServings,
+        'total_cook_servings' => $totalCookServings,
         'dishes' => $dishesBreakdown,
         'needs_recipe' => $needsRecipe,
         'prep_list' => $prepList

@@ -72,6 +72,23 @@
               <td class="px-6 py-4">
                 <div class="font-bold text-slate-900">{{ item.name }}</div>
                 <div class="text-[11px] text-slate-500 truncate max-w-[200px]" :title="item.ingredients.join(', ')">{{ item.ingredients.join(', ') }}</div>
+
+                <!-- Active Reservations & Compact Slot Summary (R2) -->
+                <div v-if="(item.reserved_qty || 0) > 0" class="mt-1.5 space-y-1">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                      Reserved: {{ item.reserved_qty }}
+                    </span>
+                    <span v-if="item.slots_summary" class="text-[11px] font-medium text-slate-500">
+                      ({{ item.slots_summary }})
+                    </span>
+                  </div>
+                  <!-- Exceed plan warning verbatim -->
+                  <div v-if="(item.reserved_qty || 0) > (item.stock || 0)" class="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 flex items-center gap-1.5">
+                    <AlertTriangle class="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                    <span>Reservations exceed plan: cooking {{ item.reserved_qty }} servings</span>
+                  </div>
+                </div>
               </td>
               <td class="px-6 py-4">
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
@@ -79,7 +96,15 @@
                 </span>
               </td>
               <td class="px-6 py-4">
-                <input type="number" v-model.number="item.stock" min="1" :disabled="!item.selected" class="w-20 px-2 py-1.5 bg-white border border-slate-300 rounded font-bold text-slate-900 disabled:opacity-50 disabled:bg-slate-100 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+                <div class="flex items-center gap-2">
+                  <input type="number" v-model.number="item.stock" min="1" :disabled="!item.selected" class="w-20 px-2 py-1.5 bg-white border border-slate-300 rounded font-bold text-slate-900 disabled:opacity-50 disabled:bg-slate-100 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+                  <span v-if="(item.reserved_qty || 0) > 0" class="text-xs font-semibold text-slate-500" :title="'Reserved: ' + item.reserved_qty">
+                    / {{ item.reserved_qty }} res
+                  </span>
+                </div>
+                <div v-if="(item.reserved_qty || 0) > (item.stock || 0)" class="text-[11px] font-bold text-rose-600 mt-1">
+                  Cooking {{ item.reserved_qty }}
+                </div>
               </td>
               <td class="px-6 py-4">
                 <div class="flex items-center space-x-2">
@@ -609,7 +634,9 @@
           <div>
             <div class="flex items-center gap-2">
               <h3 class="text-xl font-black text-slate-900">Consolidated Kitchen Prep Plan</h3>
-              <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">{{ prepPlanData.total_servings || 0 }} portions</span>
+              <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                {{ prepPlanData.total_cook_servings ?? prepPlanData.total_servings ?? 0 }} portions to cook
+              </span>
             </div>
             <p class="text-xs text-slate-500 mt-1">Aggregated raw inventory requirements scaled for today's selected lineup.</p>
           </div>
@@ -617,18 +644,39 @@
         </div>
 
         <div class="p-6 flex-1 overflow-y-auto space-y-6">
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-4 gap-3">
             <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
               <div class="text-[11px] font-bold text-slate-400 uppercase">Selected Viands</div>
               <div class="text-xl font-black text-slate-900 mt-1">{{ prepPlanData.total_dishes || 0 }} dishes</div>
             </div>
+            <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+              <div class="text-[11px] font-bold text-slate-500 uppercase">Planned Servings</div>
+              <div class="text-xl font-black text-slate-700 mt-1">{{ prepPlanData.total_planned_servings ?? prepPlanData.total_servings ?? 0 }} portions</div>
+            </div>
             <div class="bg-emerald-50/50 p-3.5 rounded-xl border border-emerald-200">
-              <div class="text-[11px] font-bold text-emerald-600 uppercase">Planned Servings</div>
-              <div class="text-xl font-black text-emerald-800 mt-1">{{ prepPlanData.total_servings || 0 }} portions</div>
+              <div class="text-[11px] font-bold text-emerald-600 uppercase">Cook Servings</div>
+              <div class="text-xl font-black text-emerald-800 mt-1">{{ prepPlanData.total_cook_servings ?? prepPlanData.total_servings ?? 0 }} portions</div>
             </div>
             <div class="bg-indigo-50/50 p-3.5 rounded-xl border border-indigo-200">
               <div class="text-[11px] font-bold text-indigo-600 uppercase">Total Ingredients</div>
               <div class="text-xl font-black text-indigo-800 mt-1">{{ prepPlanData.prep_list?.length || 0 }} items</div>
+            </div>
+          </div>
+
+          <!-- Dishes with Reservations Exceeding Plan Warning Banner (R2 & R3) -->
+          <div v-if="dishesExceedingPlan.length > 0" class="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+            <div class="flex items-center gap-2 text-xs font-bold text-rose-800 uppercase tracking-wide">
+              <AlertTriangle class="w-4 h-4 text-rose-600 flex-shrink-0" />
+              <span>Reservations Exceed Planned Servings</span>
+            </div>
+            <div class="space-y-1.5">
+              <div v-for="dish in dishesExceedingPlan" :key="dish.menu_item_id" class="flex items-center justify-between text-xs text-rose-900 bg-white/80 px-3 py-2 rounded-lg border border-rose-200/60">
+                <span class="font-bold">{{ dish.name }}</span>
+                <span class="font-bold text-rose-700 flex items-center gap-1.5">
+                  <AlertTriangle class="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                  Reservations exceed plan: cooking {{ dish.cook_servings }} servings
+                </span>
+              </div>
             </div>
           </div>
 
@@ -748,8 +796,27 @@ const showRecipeModal = ref(false)
 const recipeDish = ref(null)
 const isSuggestingRecipe = ref(false)
 const isSavingRecipe = ref(false)
-const prepPlanData = ref({ total_dishes: 0, total_servings: 0, dishes: [], prep_list: [] })
+const prepPlanData = ref({ total_dishes: 0, total_servings: 0, total_planned_servings: 0, total_cook_servings: 0, dishes: [], prep_list: [] })
 let debounceTimer = null
+
+const dishesExceedingPlan = computed(() => {
+  const result = []
+  if (prepPlanData.value.dishes) {
+    prepPlanData.value.dishes.forEach(d => {
+      if ((Number(d.reserved_qty) || 0) > (Number(d.planned_servings) || 0)) {
+        result.push(d)
+      }
+    })
+  }
+  if (prepPlanData.value.needs_recipe) {
+    prepPlanData.value.needs_recipe.forEach(d => {
+      if ((Number(d.reserved_qty) || 0) > (Number(d.planned_servings) || 0)) {
+        result.push(d)
+      }
+    })
+  }
+  return result
+})
 
 const isApplyingFloor = ref(false)
 const recipeForm = reactive({
@@ -950,6 +1017,9 @@ const initRoster = () => {
       selected: dish.is_active === 1,
       stock: dish.stock !== undefined ? dish.stock : (dish.online_pool_qty !== undefined ? dish.online_pool_qty : 10),
       current_price: dish.current_price !== undefined ? dish.current_price : dish.base_price,
+      reserved_qty: Number(dish.reserved_qty) || 0,
+      pickup_slots: dish.pickup_slots || [],
+      slots_summary: dish.slots_summary || ''
     }
   })
   fetchPrepPlan()
@@ -966,6 +1036,14 @@ watch(masterCatalog, () => {
 // Watch roster selections to update prep plan
 watch(() => activeRoster.value.map(r => r.selected), () => {
   fetchPrepPlan()
+}, { deep: true })
+
+// Watch stock updates to debounce prep plan recalculation
+watch(() => activeRoster.value.map(r => r.stock), () => {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    fetchPrepPlan()
+  }, 350)
 }, { deep: true })
 
 const onServingsSliderInput = () => {
@@ -988,7 +1066,7 @@ const onServingsSliderInput = () => {
 const fetchPrepPlan = async () => {
   const selectedItems = activeRoster.value.filter(r => r.selected)
   if (selectedItems.length === 0) {
-    prepPlanData.value = { total_dishes: 0, total_servings: 0, dishes: [], prep_list: [] }
+    prepPlanData.value = { total_dishes: 0, total_servings: 0, total_planned_servings: 0, total_cook_servings: 0, dishes: [], prep_list: [] }
     return
   }
   try {
@@ -1005,6 +1083,21 @@ const fetchPrepPlan = async () => {
     })
     if (res.ok) {
       prepPlanData.value = await res.json()
+      // Synchronize latest reservation counts and summaries onto activeRoster
+      const dishInfoMap = {}
+      if (prepPlanData.value.dishes) {
+        prepPlanData.value.dishes.forEach(d => { dishInfoMap[d.menu_item_id] = d })
+      }
+      if (prepPlanData.value.needs_recipe) {
+        prepPlanData.value.needs_recipe.forEach(d => { dishInfoMap[d.menu_item_id] = d })
+      }
+      activeRoster.value.forEach(item => {
+        if (dishInfoMap[item.id]) {
+          item.reserved_qty = Number(dishInfoMap[item.id].reserved_qty) || 0
+          item.pickup_slots = dishInfoMap[item.id].pickup_slots || []
+          item.slots_summary = dishInfoMap[item.id].slots_summary || ''
+        }
+      })
     }
   } catch (err) {
     console.error('Failed to fetch prep plan', err)
