@@ -152,7 +152,7 @@ function handleGetMenu($pdo) {
     }
 
     $stmt = $pdo->prepare("
-        SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url,
+        SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url, m.ingredients_text,
                m.category, m.dietary, m.ai_confirmed, m.calories, m.protein_g, m.carbs_g, m.fat_g, m.sodium_mg,
                i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
                i.cooked_at, i.sell_by
@@ -224,6 +224,19 @@ function handleGetMenu($pdo) {
         ");
         $unmappedStmt->execute([$item['id']]);
         $unmappedNames = $unmappedStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        // Also check if ingredients_text has unmapped ingredients
+        if (!empty($item['ingredients_text'])) {
+            $textParts = array_filter(array_map('trim', explode(',', $item['ingredients_text'])));
+            $checkIngStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+            foreach ($textParts as $tName) {
+                $checkIngStmt->execute([$tName]);
+                if (!$checkIngStmt->fetchColumn() && !in_array($tName, $unmappedNames, true)) {
+                    $unmappedNames[] = $tName;
+                }
+            }
+        }
+
         foreach ($unmappedNames as $uName) {
             $formatted = trim($uName) . " (Not in allergen list - review)";
             if (!in_array($formatted, $ingredients, true)) {
@@ -349,7 +362,58 @@ function handleCreateReservation($pdo) {
                 WHERE mii.menu_item_id IN ($placeholders)
             ");
             $stmtIngredients->execute($itemIds);
-            $dishIngredients = $stmtIngredients->fetchAll(PDO::FETCH_COLUMN);
+            $dishIngredients = $stmtIngredients->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+            // A1 Defense: Fetch dish-level ingredients_text
+            $stmtDishText = $pdo->prepare("
+                SELECT ingredients_text 
+                FROM menu_items 
+                WHERE id IN ($placeholders) AND ingredients_text IS NOT NULL AND ingredients_text != ''
+            ");
+            $stmtDishText->execute($itemIds);
+            $dishTextRows = $stmtDishText->fetchAll(PDO::FETCH_COLUMN);
+            $dishTextIngredients = [];
+            foreach ($dishTextRows as $txt) {
+                foreach (explode(',', $txt) as $part) {
+                    $clean = trim($part);
+                    if ($clean !== '') {
+                        $dishTextIngredients[] = $clean;
+                        if (!in_array($clean, $dishIngredients, true)) {
+                            $dishIngredients[] = $clean;
+                        }
+                    }
+                }
+            }
+
+            // A1 Defense: Fetch unmapped recipe ingredients (where ingredient_id IS NULL)
+            $stmtUnmappedRecipe = $pdo->prepare("
+                SELECT DISTINCT ri.ingredient_name
+                FROM recipe_ingredients ri
+                JOIN recipes r ON ri.recipe_id = r.id
+                WHERE r.menu_item_id IN ($placeholders) AND ri.ingredient_id IS NULL
+            ");
+            $stmtUnmappedRecipe->execute($itemIds);
+            $unmappedRecipeIngredients = $stmtUnmappedRecipe->fetchAll(PDO::FETCH_COLUMN) ?: [];
+            foreach ($unmappedRecipeIngredients as $uri) {
+                $clean = trim($uri);
+                if ($clean !== '' && !in_array($clean, $dishIngredients, true)) {
+                    $dishIngredients[] = $clean;
+                }
+            }
+
+            // Check which ingredients in ingredients_text are unmapped
+            $unmappedFromText = [];
+            if (!empty($dishTextIngredients)) {
+                $checkStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+                foreach ($dishTextIngredients as $dti) {
+                    $checkStmt->execute([$dti]);
+                    if (!$checkStmt->fetchColumn()) {
+                        $unmappedFromText[] = $dti;
+                    }
+                }
+            }
+
+            $allUnmappedIngredients = array_values(array_unique(array_filter(array_merge($unmappedRecipeIngredients, $unmappedFromText))));
 
             $allergenKeywords = [
                 'dairy' => ['dairy', 'milk', 'cheese', 'butter', 'cream', 'condensed milk', 'evaporated milk', 'curd', 'whey', 'yogurt'],
@@ -377,7 +441,7 @@ function handleCreateReservation($pdo) {
                     }
                 }
 
-                // Ingredient keyword check
+                // Ingredient keyword check (scans mapped, text, and unmapped ingredients)
                 $keywords = $allergenKeywords[$uaLower] ?? [$uaLower];
                 foreach ($dishIngredients as $di) {
                     $diLower = strtolower(trim($di));
@@ -387,6 +451,13 @@ function handleCreateReservation($pdo) {
                             break 2;
                         }
                     }
+                }
+            }
+
+            // A1 Defense: If student has declared allergens and an unmapped ingredient is present, force "Needs Review"
+            if (!empty($allUnmappedIngredients)) {
+                foreach ($allUnmappedIngredients as $unmappedItem) {
+                    $conflictingAllergens[] = "$unmappedItem (Unmapped - Needs Review)";
                 }
             }
 

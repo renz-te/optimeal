@@ -381,6 +381,111 @@ Do NOT output any allergen keys, allergen tags, or markdown formatting. Output r
     jsonResponse(['error' => 'Invalid AI Response Format'], 502);
 }
 
+/**
+ * A2: Synchronizes menu_item_ingredients and menu_item_critical_allergens
+ * from all ingredient sources (menu_items.ingredients_text + recipe_ingredients + any explicit input ingredients).
+ * This establishes a single source of truth so saving recipes does not wipe dish-level allergens,
+ * and saving dishes preserves recipe-level ingredients.
+ */
+function syncDishIngredientLinks($pdo, $menuItemId, $storeId, ?array $additionalIngredients = null) {
+    // 1. Fetch dish-level ingredients from menu_items.ingredients_text
+    $stmtText = $pdo->prepare("SELECT ingredients_text FROM menu_items WHERE id = ?");
+    $stmtText->execute([$menuItemId]);
+    $dishIngText = $stmtText->fetchColumn();
+    $dishIngredients = [];
+    if (!empty($dishIngText)) {
+        $dishIngredients = array_filter(array_map('trim', explode(',', $dishIngText)));
+    }
+
+    // 2. Fetch recipe-level ingredients from recipe_ingredients
+    $stmtRecipe = $pdo->prepare("
+        SELECT ri.ingredient_name 
+        FROM recipe_ingredients ri
+        JOIN recipes r ON ri.recipe_id = r.id
+        WHERE r.menu_item_id = ?
+    ");
+    $stmtRecipe->execute([$menuItemId]);
+    $recipeIngredients = $stmtRecipe->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+    // 3. Merge all sources
+    $allRaw = array_merge($dishIngredients, $recipeIngredients, $additionalIngredients ?: []);
+    $uniqueNames = array_values(array_unique(array_filter(array_map('trim', $allRaw))));
+
+    if (empty($uniqueNames)) {
+        $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$menuItemId]);
+        $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$menuItemId]);
+        return ['mapped_ids' => [], 'allergens' => []];
+    }
+
+    $findStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
+    $subStmt = $pdo->prepare("INSERT IGNORE INTO ingredient_submissions (raw_name, status, store_id) VALUES (?, 'pending', ?)");
+
+    $mappedIngredientIds = [];
+    foreach ($uniqueNames as $name) {
+        if ($name === '') continue;
+        $findStmt->execute([$name]);
+        $ingId = $findStmt->fetchColumn();
+        if ($ingId) {
+            $mappedIngredientIds[] = (int)$ingId;
+        } else {
+            $subStmt->execute([$name, $storeId]);
+        }
+    }
+    $mappedIngredientIds = array_values(array_unique($mappedIngredientIds));
+
+    // 4. Synchronize menu_item_ingredients
+    if (!empty($mappedIngredientIds)) {
+        $inClause = implode(',', array_fill(0, count($mappedIngredientIds), '?'));
+        $delStmt = $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ? AND ingredient_id NOT IN ($inClause)");
+        $delStmt->execute(array_merge([$menuItemId], $mappedIngredientIds));
+
+        $insStmt = $pdo->prepare("INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES (?, ?)");
+        foreach ($mappedIngredientIds as $mid) {
+            $insStmt->execute([$menuItemId, $mid]);
+        }
+    } else {
+        $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$menuItemId]);
+    }
+
+    // 5. Synchronize menu_item_critical_allergens
+    $detectedAllergens = [];
+    if (!empty($mappedIngredientIds)) {
+        $inClause = implode(',', array_fill(0, count($mappedIngredientIds), '?'));
+        $stmtAllergens = $pdo->prepare("
+            SELECT DISTINCT ca.id, ca.name
+            FROM ingredient_allergen_map iam
+            JOIN critical_allergens ca ON iam.allergen_id = ca.id
+            WHERE iam.ingredient_id IN ($inClause)
+            ORDER BY ca.name ASC
+        ");
+        $stmtAllergens->execute($mappedIngredientIds);
+        $allergenRows = $stmtAllergens->fetchAll(PDO::FETCH_ASSOC);
+
+        $detectedAllergenIds = array_map(function($r) { return (int)$r['id']; }, $allergenRows);
+        $detectedAllergens = array_map(function($r) { return $r['name']; }, $allergenRows);
+
+        if (!empty($detectedAllergenIds)) {
+            $inClauseAllergens = implode(',', array_fill(0, count($detectedAllergenIds), '?'));
+            $delAllergen = $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ? AND allergen_id NOT IN ($inClauseAllergens)");
+            $delAllergen->execute(array_merge([$menuItemId], $detectedAllergenIds));
+
+            $insAllergen = $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)");
+            foreach ($detectedAllergenIds as $aid) {
+                $insAllergen->execute([$menuItemId, $aid]);
+            }
+        } else {
+            $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$menuItemId]);
+        }
+    } else {
+        $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$menuItemId]);
+    }
+
+    return [
+        'mapped_ids' => $mappedIngredientIds,
+        'allergens' => $detectedAllergens
+    ];
+}
+
 function handleSaveDish($pdo) {
     $store_id = requireVendor($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
@@ -405,6 +510,15 @@ function handleSaveDish($pdo) {
     if ($calories !== null && $calories !== '' && !$ai_confirmed) {
         jsonResponse(['error' => 'AI-estimated macros must be explicitly confirmed by the vendor'], 400);
     }
+
+    $rawIngredients = [];
+    if (!empty($input['ingredients']) && is_array($input['ingredients'])) {
+        $rawIngredients = $input['ingredients'];
+    } elseif (!empty($input['ingredientsString'])) {
+        $rawIngredients = explode(',', $input['ingredientsString']);
+    }
+    $ingredients = array_values(array_unique(array_filter(array_map('trim', $rawIngredients))));
+    $ingredientsText = !empty($ingredients) ? implode(', ', $ingredients) : null;
     
     try {
         $pdo->beginTransaction();
@@ -413,7 +527,7 @@ function handleSaveDish($pdo) {
             $stmt = $pdo->prepare("
                 UPDATE menu_items 
                 SET name = ?, description = ?, category = ?, dietary = ?, base_price = ?, price_floor = ?, image_url = ?,
-                    calories = ?, protein_g = ?, carbs_g = ?, fat_g = ?, sodium_mg = ?, ai_confirmed = ?
+                    calories = ?, protein_g = ?, carbs_g = ?, fat_g = ?, sodium_mg = ?, ai_confirmed = ?, ingredients_text = ?
                 WHERE id = ? AND store_id = ?
             ");
             $stmt->execute([
@@ -425,15 +539,13 @@ function handleSaveDish($pdo) {
                 isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
                 isset($input['image_url']) ? $input['image_url'] : null,
                 $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
+                $ingredientsText,
                 $dishId, $store_id
             ]);
-            
-            $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$dishId]);
-            $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$dishId]);
         } else {
             $stmt = $pdo->prepare("
-                INSERT INTO menu_items (store_id, name, description, category, dietary, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO menu_items (store_id, name, description, category, dietary, base_price, price_floor, image_url, calories, protein_g, carbs_g, fat_g, sodium_mg, ai_confirmed, ingredients_text, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ");
             $stmt->execute([
                 $store_id,
@@ -444,7 +556,8 @@ function handleSaveDish($pdo) {
                 $input['base_price'],
                 isset($input['price_floor']) ? $input['price_floor'] : $input['base_price'],
                 isset($input['image_url']) ? $input['image_url'] : null,
-                $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed
+                $calories, $protein_g, $carbs_g, $fat_g, $sodium_mg, $ai_confirmed,
+                $ingredientsText
             ]);
             $dishId = $pdo->lastInsertId();
             
@@ -463,56 +576,9 @@ function handleSaveDish($pdo) {
             $prStmt->execute([$dishId]);
         }
     
-    $rawIngredients = [];
-    if (!empty($input['ingredients']) && is_array($input['ingredients'])) {
-        $rawIngredients = $input['ingredients'];
-    } elseif (!empty($input['ingredientsString'])) {
-        $rawIngredients = explode(',', $input['ingredientsString']);
-    }
-
-    if (!empty($rawIngredients)) {
-        $ingredients = array_unique(array_filter(array_map('trim', $rawIngredients)));
-        
-        $findStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
-        $subStmt = $pdo->prepare("INSERT IGNORE INTO ingredient_submissions (raw_name, status) VALUES (?, 'pending')");
-        $mapIngStmt = $pdo->prepare("INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id) VALUES (?, ?)");
-        $getAllergensStmt = $pdo->prepare("SELECT allergen_id FROM ingredient_allergen_map WHERE ingredient_id = ?");
-        $mapAllergenStmt = $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)");
-
-        foreach ($ingredients as $ing) {
-            if ($ing === '') continue;
-
-            $findStmt->execute([$ing]);
-            $ingId = $findStmt->fetchColumn();
-
-            if ($ingId) {
-                // Recognized ingredient: map to dish and critical allergens
-                $mapIngStmt->execute([$dishId, $ingId]);
-                    
-                $getAllergensStmt->execute([$ingId]);
-                $allergens = $getAllergensStmt->fetchAll(PDO::FETCH_COLUMN);
-                
-                foreach ($allergens as $allergenId) {
-                    $mapAllergenStmt->execute([$dishId, $allergenId]);
-                }
-            } else {
-                // Unrecognized ingredient: intercept and push to ingredient_submissions queue
-                $subStmt->execute([$ing]);
-            }
-        }
-    }
-    
-        $mappedAllergenNames = [];
-        if ($dishId) {
-            $stmt = $pdo->prepare("
-                SELECT ca.name 
-                FROM menu_item_critical_allergens mica
-                JOIN critical_allergens ca ON mica.allergen_id = ca.id
-                WHERE mica.menu_item_id = ?
-            ");
-            $stmt->execute([$dishId]);
-            $mappedAllergenNames = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        }
+        // A2: Single source of truth sync
+        $syncResult = syncDishIngredientLinks($pdo, $dishId, $store_id, $ingredients);
+        $mappedAllergenNames = $syncResult['allergens'];
         
         $pdo->commit();
         
@@ -1467,46 +1533,9 @@ function handleSaveRecipe($pdo) {
             ];
         }
 
-        // H1 Critical Fix: Do NOT DELETE FROM menu_item_ingredients wholesale.
-        // Instead, compute the IDs of the submitted mapped ingredients. Delete only links that are not in the new submitted list.
-        // Use INSERT IGNORE to add the newly matched ones.
-        if (!empty($mappedIngredientIds)) {
-            $inClause = implode(',', array_fill(0, count($mappedIngredientIds), '?'));
-            $deleteOld = $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ? AND ingredient_id NOT IN ($inClause)");
-            $deleteOld->execute(array_merge([$menu_item_id], $mappedIngredientIds));
-
-            $insertMenuItemIng = $pdo->prepare("
-                INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id)
-                VALUES (?, ?)
-            ");
-            foreach ($mappedIngredientIds as $mid) {
-                $insertMenuItemIng->execute([$menu_item_id, $mid]);
-            }
-        } else {
-            $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$menu_item_id]);
-        }
-
-        $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$menu_item_id]);
-        $detectedAllergens = [];
-
-        if (!empty($mappedIngredientIds)) {
-            $inClause = implode(',', array_fill(0, count($mappedIngredientIds), '?'));
-            $stmtAllergens = $pdo->prepare("
-                SELECT DISTINCT ca.id, ca.name 
-                FROM ingredient_allergen_map iam
-                JOIN critical_allergens ca ON iam.allergen_id = ca.id
-                WHERE iam.ingredient_id IN ($inClause)
-                ORDER BY ca.name ASC
-            ");
-            $stmtAllergens->execute($mappedIngredientIds);
-            $allergensList = $stmtAllergens->fetchAll(PDO::FETCH_ASSOC);
-
-            $insAllergen = $pdo->prepare("INSERT IGNORE INTO menu_item_critical_allergens (menu_item_id, allergen_id) VALUES (?, ?)");
-            foreach ($allergensList as $al) {
-                $insAllergen->execute([$menu_item_id, $al['id']]);
-                $detectedAllergens[] = $al['name'];
-            }
-        }
+        // A2: Single source of truth sync using syncDishIngredientLinks
+        $syncResult = syncDishIngredientLinks($pdo, $menu_item_id, $store_id);
+        $detectedAllergens = $syncResult['allergens'];
 
         $pdo->commit();
 

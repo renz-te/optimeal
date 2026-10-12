@@ -244,25 +244,24 @@
             </div>
 
             <div>
-              <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center justify-between">
-                <span>Allergens (Medical)</span>
-                <label class="flex items-center space-x-1 cursor-pointer normal-case tracking-normal">
-                  <input type="checkbox" v-model="formData.isAllergenFree" @change="toggleAllergenFree" class="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
-                  <span class="text-[11px] font-bold text-slate-600">Allergen-Free Recipe</span>
-                </label>
+              <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span>Critical Allergens (Derived)</span>
+                <span class="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">Read-Only</span>
               </label>
-              <div class="flex flex-wrap gap-2" :class="formData.isAllergenFree ? 'opacity-50 pointer-events-none' : ''">
-                <button v-for="tag in masterTaxonomy.allergens" :key="tag" 
-                        @click="toggleTag('allergens', tag)"
-                        class="px-3 py-1 text-xs font-bold rounded-full border transition-colors"
-                        :class="formData.allergens.includes(tag) ? 'bg-rose-100 text-rose-700 border-rose-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'">
+              <div v-if="formData.allergens && formData.allergens.length > 0" class="flex flex-wrap gap-1.5">
+                <span v-for="tag in formData.allergens" :key="tag" 
+                      class="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-full bg-rose-100 text-rose-700 border border-rose-300">
+                  <AlertTriangle :size="12" />
                   {{ tag }}
-                </button>
+                </span>
               </div>
-              <div class="flex items-center space-x-2 mt-3" :class="formData.isAllergenFree ? 'opacity-50 pointer-events-none' : ''">
-                 <input type="text" v-model="newCustomAllergen" placeholder="+ Add missing allergen" @keyup.enter="addNewAllergen" class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg w-48 focus:border-emerald-500 outline-none font-medium">
-                 <button @click="addNewAllergen" class="text-xs font-bold bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-300 transition-colors">Add</button>
+              <div v-else class="text-xs text-slate-400 italic py-1">
+                No critical allergens mapped from current ingredients.
               </div>
+              <p class="text-[11px] text-slate-500 mt-2 flex items-start gap-1.5 bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                <Shield :size="14" class="text-slate-400 shrink-0 mt-0.5" />
+                <span>Allergens are derived automatically from the ingredient list and recipe taxonomy to guarantee diner safety. To modify allergens, edit the dish ingredients or recipe items.</span>
+              </p>
             </div>
 
             <div>
