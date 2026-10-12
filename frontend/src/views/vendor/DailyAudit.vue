@@ -60,7 +60,12 @@
       <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
         <div class="flex justify-between items-start">
           <div>
-            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Cost of Goods Sold (COGS)</p>
+            <div class="flex items-center gap-1.5">
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Cost of Goods Sold (COGS)</p>
+              <span v-if="auditData.summary?.is_partial_cost" class="text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
+                (Partial)
+              </span>
+            </div>
             <h2 class="text-3xl font-black text-slate-800 mt-2">
               ₱{{ formatMoney(auditData.summary?.total_cogs || 0) }}
             </h2>
@@ -72,7 +77,7 @@
         <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
           <span>Recipe food cost of sold viands</span>
           <span class="text-slate-600 font-bold bg-slate-100 px-2 py-0.5 rounded-md">
-            Dynamic Food Cost
+            {{ auditData.summary?.cost_coverage || 'Dynamic Food Cost' }}
           </span>
         </div>
       </div>
@@ -81,7 +86,12 @@
       <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden flex flex-col justify-between">
         <div class="flex justify-between items-start">
           <div>
-            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Gross Profit</p>
+            <div class="flex items-center gap-1.5">
+              <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Gross Profit</p>
+              <span v-if="auditData.summary?.is_partial_cost" class="text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
+                (Partial)
+              </span>
+            </div>
             <h2 class="text-3xl font-black mt-2" :class="(auditData.summary?.gross_profit || 0) >= 0 ? 'text-indigo-600' : 'text-rose-600'">
               ₱{{ formatMoney(auditData.summary?.gross_profit || 0) }}
             </h2>
@@ -91,7 +101,7 @@
           </div>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-500">
-          <span>Gross Margin</span>
+          <span>Gross Margin <span v-if="auditData.summary?.is_partial_cost" class="text-amber-600 text-[10px] font-bold">(Partial)</span></span>
           <span 
             class="px-2 py-0.5 rounded-md font-bold text-xs" 
             :class="(auditData.summary?.gross_margin_pct || 0) >= 50 ? 'bg-emerald-100 text-emerald-800' : ((auditData.summary?.gross_margin_pct || 0) > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800')"
@@ -305,7 +315,7 @@
               </td>
               <td class="px-6 py-4 text-xs font-bold">
                 <span :class="order.fulfillment_type === 'take_out' ? 'text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200' : 'text-slate-600 bg-slate-100 px-2 py-0.5 rounded'">
-                  {{ order.fulfillment_type === 'take_out' ? '🥡 Take-Out' : '🍽️ Dine-In' }}
+                  {{ order.fulfillment_type === 'take_out' ? 'Take-Out' : 'Dine-In' }}
                 </span>
               </td>
               <td class="px-6 py-4 text-xs font-medium text-slate-500">

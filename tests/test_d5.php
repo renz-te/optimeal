@@ -79,6 +79,9 @@ echo "✓ 2. Student Authenticated\n";
 // 3. Ensure test dish 905 ("D4 Roast Chicken Test") is ready with cost = ₱50.00 and base_price = ₱150.00
 echo "\n--- TEST STEP 1: Verify Test Dish Setup (₱50 Cost, ₱150 Price) ---\n";
 $storeId = 1;
+$origClosing = $pdo->query("SELECT closing_time FROM settings WHERE id = 1")->fetchColumn();
+$pdo->prepare("UPDATE settings SET closing_time = '23:00' WHERE id = 1")->execute();
+$createdOrderIds = [];
 
 // Set Chicken cost to ₱200/kg
 apiRequest("$baseUrl/vendor/ingredient-costs", 'POST', [
@@ -100,13 +103,14 @@ if (!$dishId) {
 } else {
     $dishId = (int)$dishId;
     $pdo->prepare("UPDATE menu_items SET base_price = 150.00, is_active = 1 WHERE id = ?")->execute([$dishId]);
-    $pdo->prepare("UPDATE inventory SET online_pool_qty = 10, walkin_pool_qty = 2, delisted_from_app = 0, sell_by = DATE_ADD(NOW(), INTERVAL 4 HOUR), cooked_at = NOW() WHERE menu_item_id = ?")->execute([$dishId]);
+    $pdo->prepare("INSERT INTO inventory (menu_item_id, walkin_pool_qty, online_pool_qty, critical_stock_threshold, delisted_from_app, sell_by, cooked_at) VALUES (?, 2, 10, 2, 0, DATE_ADD(NOW(), INTERVAL 4 HOUR), NOW()) ON DUPLICATE KEY UPDATE online_pool_qty = 10, walkin_pool_qty = 2, delisted_from_app = 0, sell_by = DATE_ADD(NOW(), INTERVAL 4 HOUR), cooked_at = NOW()")->execute([$dishId]);
 }
 
 // Ensure recipe is 250g Chicken, yield 1
 apiRequest("$baseUrl/vendor/dish/recipe", 'POST', [
     'menu_item_id' => $dishId,
     'yield_servings' => 1,
+    'confirmed' => true,
     'instructions' => 'Roast at 180C',
     'ingredients' => [
         ['name' => 'Chicken', 'quantity' => 250, 'unit' => 'g']
@@ -160,6 +164,8 @@ if ($order2Res['status'] !== 200 && $order2Res['status'] !== 201) {
     exit(1);
 }
 $order2Id = $order2Res['data']['order_id'] ?? null;
+if ($order1Id) $createdOrderIds[] = $order1Id;
+if ($order2Id) $createdOrderIds[] = $order2Id;
 
 echo "✓ Created Order #$order1Id (₱150.00) and Order #$order2Id (₱150.00)\n";
 
@@ -257,6 +263,20 @@ if ($directWebRes['status'] === 403 || $directWebRes['status'] === 404) {
     echo "✗ TEST STEP 6 FAILED: Expected 403 or 404, got {$directWebRes['status']}\n";
     exit(1);
 }
+
+// L4 Hygiene & Restore Settings
+if ($origClosing) {
+    $pdo->prepare("UPDATE settings SET closing_time = ? WHERE id = 1")->execute([$origClosing]);
+}
+if (!empty($createdOrderIds)) {
+    $inOrd = implode(',', $createdOrderIds);
+    $pdo->exec("DELETE FROM order_items WHERE order_id IN ($inOrd)");
+    $pdo->exec("DELETE FROM payments WHERE order_id IN ($inOrd)");
+    $pdo->exec("DELETE FROM orders WHERE id IN ($inOrd)");
+    $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
+}
+if (file_exists($cookieVendor)) @unlink($cookieVendor);
+if (file_exists($cookieStudent)) @unlink($cookieStudent);
 
 echo "\n============================================\n";
 echo "✓ ALL PHASE D5 VERIFICATIONS PASSED CLEANLY!\n";

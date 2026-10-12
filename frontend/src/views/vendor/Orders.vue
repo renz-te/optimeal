@@ -70,7 +70,7 @@
           <template v-if="activeTab === 'Pending Pickup' && order.fulfillment_type === 'take_out'">
             <span v-if="order.notification_status === 'ready_sent'" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-300">
               <Check class="w-3.5 h-3.5 text-emerald-600" />
-              <span>Notification Sent</span>
+              <span>Marked ready - visible in student's order history</span>
             </span>
             <button 
               v-else 

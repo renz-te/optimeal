@@ -243,7 +243,7 @@ function handleNotifyReady($pdo) {
 
     jsonResponse([
         'success' => true,
-        'message' => 'Order ready notification sent to student.',
+        'message' => "Marked ready - visible in student's order history",
         'order_id' => $order_id,
         'notification_status' => 'ready_sent'
     ]);
@@ -326,7 +326,8 @@ Do NOT output any allergen keys, allergen tags, or markdown formatting. Output r
         ]
     ];
 
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" . $apiKey;
+    $modelName = defined('GEMINI_MODEL') ? GEMINI_MODEL : 'gemini-3.5-flash';
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/{$modelName}:generateContent?key=" . $apiKey;
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -845,11 +846,14 @@ function handleGetDailyAudit($pdo) {
         if (!isset($recipeBatches[$menuItemId])) {
             $recipeBatches[$menuItemId] = [
                 'yield_servings' => max(1, (int)$row['yield_servings']),
-                'total_batch_cost' => 0.0
+                'total_batch_cost' => 0.0,
+                'costed_count' => 0,
+                'total_count' => 0
             ];
         }
 
         if (!empty($row['ingredient_name']) && (float)$row['quantity'] > 0) {
+            $recipeBatches[$menuItemId]['total_count']++;
             $matchedCost = null;
             if (!empty($row['ingredient_id']) && isset($costMapById[(int)$row['ingredient_id']])) {
                 $matchedCost = $costMapById[(int)$row['ingredient_id']];
@@ -862,15 +866,26 @@ function handleGetDailyAudit($pdo) {
 
             if ($matchedCost) {
                 $unitCost = (float)$matchedCost['cost'];
-                $itemCost = calculateIngredientItemCost((float)$row['quantity'], $row['unit'], $unitCost, $matchedCost['cost_unit']);
-                $recipeBatches[$menuItemId]['total_batch_cost'] += $itemCost;
+                $costRes = calculateIngredientItemCost((float)$row['quantity'], $row['unit'], $unitCost, $matchedCost['cost_unit']);
+                if ($costRes['cost'] !== null) {
+                    $recipeBatches[$menuItemId]['total_batch_cost'] += $costRes['cost'];
+                    $recipeBatches[$menuItemId]['costed_count']++;
+                }
             }
         }
     }
 
+    $auditTotalIngredients = 0;
+    $auditCostedIngredients = 0;
     foreach ($recipeBatches as $menuItemId => $data) {
         $dishCostPerServingMap[$menuItemId] = round($data['total_batch_cost'] / (float)$data['yield_servings'], 2);
+        $auditTotalIngredients += $data['total_count'];
+        $auditCostedIngredients += $data['costed_count'];
     }
+    $isPartialAuditCost = ($auditTotalIngredients > 0 && $auditCostedIngredients < $auditTotalIngredients);
+    $auditCostCoverage = $auditTotalIngredients > 0 
+        ? "{$auditCostedIngredients} of {$auditTotalIngredients} ingredients costed" 
+        : "No recipe ingredients";
 
     // 1. Aggregated daily order metrics for today in Asia/Manila
     $orderQuery = "
@@ -1010,6 +1025,8 @@ function handleGetDailyAudit($pdo) {
             'total_cogs' => $totalCogs,
             'gross_profit' => $grossProfit,
             'gross_margin_pct' => $grossMarginPct,
+            'cost_coverage' => $auditCostCoverage,
+            'is_partial_cost' => $isPartialAuditCost,
             'total_orders' => (int)$orderSummary['total_orders'],
             'claimed_orders' => (int)$orderSummary['claimed_orders'],
             'cancelled_orders' => (int)$orderSummary['cancelled_orders'],
@@ -1033,8 +1050,11 @@ function handleGetDailyAudit($pdo) {
 }
 
 function calculateIngredientItemCost($recipeQty, $recipeUnit, $cost, $costUnit) {
-    if ($cost <= 0 || $recipeQty <= 0) {
-        return 0.0;
+    if ($cost <= 0) {
+        return ['cost' => null, 'reason' => 'No cost recorded'];
+    }
+    if ($recipeQty <= 0) {
+        return ['cost' => 0.0, 'reason' => 'Zero recipe quantity'];
     }
 
     $rUnit = strtolower(trim($recipeUnit));
@@ -1042,33 +1062,32 @@ function calculateIngredientItemCost($recipeQty, $recipeUnit, $cost, $costUnit) 
 
     // Direct unit match
     if ($rUnit === $cUnit) {
-        return (float)($recipeQty * $cost);
+        return ['cost' => (float)($recipeQty * $cost), 'reason' => 'Direct unit match'];
     }
 
     // Mass conversions (g <-> kg)
     if (in_array($rUnit, ['g', 'gram', 'grams'], true) && in_array($cUnit, ['kg', 'kilo', 'kilogram', 'kilograms'], true)) {
-        return (float)(($recipeQty / 1000.0) * $cost);
+        return ['cost' => (float)(($recipeQty / 1000.0) * $cost), 'reason' => 'Mass conversion (g to kg)'];
     }
     if (in_array($rUnit, ['kg', 'kilo', 'kilogram', 'kilograms'], true) && in_array($cUnit, ['g', 'gram', 'grams'], true)) {
-        return (float)(($recipeQty * 1000.0) * $cost);
+        return ['cost' => (float)(($recipeQty * 1000.0) * $cost), 'reason' => 'Mass conversion (kg to g)'];
     }
 
     // Volume conversions (ml <-> l)
     if (in_array($rUnit, ['ml', 'milliliter', 'milliliters'], true) && in_array($cUnit, ['l', 'liter', 'liters'], true)) {
-        return (float)(($recipeQty / 1000.0) * $cost);
+        return ['cost' => (float)(($recipeQty / 1000.0) * $cost), 'reason' => 'Volume conversion (ml to l)'];
     }
     if (in_array($rUnit, ['l', 'liter', 'liters'], true) && in_array($cUnit, ['ml', 'milliliter', 'milliliters'], true)) {
-        return (float)(($recipeQty * 1000.0) * $cost);
+        return ['cost' => (float)(($recipeQty * 1000.0) * $cost), 'reason' => 'Volume conversion (l to ml)'];
     }
 
     // Count conversions (pc, pcs, piece, pieces)
     if (in_array($rUnit, ['pc', 'pcs', 'piece', 'pieces'], true) && in_array($cUnit, ['pc', 'pcs', 'piece', 'pieces'], true)) {
-        return (float)($recipeQty * $cost);
+        return ['cost' => (float)($recipeQty * $cost), 'reason' => 'Direct count match'];
     }
 
     // Incompatible units (e.g. recipe is 'tsp' or 'cup' while cost is 'kg')
-    // Per execution notes: fallback to 0.0
-    return 0.0;
+    return ['cost' => null, 'reason' => "Incompatible units ({$recipeUnit} vs {$costUnit})"];
 }
 
 function handleGetIngredientCosts($pdo) {
@@ -1134,8 +1153,8 @@ function handleApplyPriceFloor($pdo) {
     $menu_item_id = (int)($input['menu_item_id'] ?? 0);
     $price_floor = (float)($input['price_floor'] ?? 0);
 
-    if ($menu_item_id <= 0 || $price_floor <= 0) {
-        jsonResponse(['error' => 'Invalid menu_item_id or price_floor'], 400);
+    if ($menu_item_id <= 0) {
+        jsonResponse(['error' => 'Invalid menu_item_id'], 422);
     }
 
     $stmtCheck = $pdo->prepare("SELECT id, name, base_price FROM menu_items WHERE id = ? AND store_id = ?");
@@ -1144,6 +1163,11 @@ function handleApplyPriceFloor($pdo) {
 
     if (!$dish) {
         jsonResponse(['error' => 'Dish not found or does not belong to your store'], 404);
+    }
+
+    $basePrice = (float)$dish['base_price'];
+    if ($price_floor <= 0 || $price_floor > $basePrice) {
+        jsonResponse(['error' => "Price floor must be greater than 0 and cannot exceed the base price of ₱{$basePrice}."], 422);
     }
 
     $stmtUpdate = $pdo->prepare("UPDATE menu_items SET price_floor = ? WHERE id = ? AND store_id = ?");
@@ -1204,6 +1228,9 @@ function handleGetRecipe($pdo) {
             'has_unmapped' => false,
             'total_batch_cost' => 0.0,
             'cost_per_serving' => 0.0,
+            'cost_coverage' => '0 of 0 ingredients costed',
+            'costed_count' => 0,
+            'total_count' => 0,
             'suggested_price_floor' => 0.0,
             'margin_multiplier' => 2.5
         ]);
@@ -1224,8 +1251,11 @@ function handleGetRecipe($pdo) {
     $hasUnmapped = false;
     $ingredientIds = [];
     $totalBatchCost = 0.0;
+    $costedCount = 0;
+    $totalCount = 0;
 
     foreach ($rawIngredients as $ri) {
+        $totalCount++;
         $isUnmapped = empty($ri['ingredient_id']);
         if ($isUnmapped) {
             $hasUnmapped = true;
@@ -1246,9 +1276,14 @@ function handleGetRecipe($pdo) {
 
         $unitCost = $matchedCost ? (float)$matchedCost['cost'] : 0.0;
         $costUnit = $matchedCost ? $matchedCost['cost_unit'] : (in_array(strtolower($ri['unit']), ['g', 'kg']) ? 'kg' : (in_array(strtolower($ri['unit']), ['ml', 'l']) ? 'l' : $ri['unit']));
-        $itemTotalCost = $matchedCost ? calculateIngredientItemCost((float)$ri['quantity'], $ri['unit'], $unitCost, $matchedCost['cost_unit']) : 0.0;
+        $costResult = $matchedCost 
+            ? calculateIngredientItemCost((float)$ri['quantity'], $ri['unit'], $unitCost, $matchedCost['cost_unit']) 
+            : ['cost' => null, 'reason' => 'No cost recorded'];
 
-        $totalBatchCost += $itemTotalCost;
+        if ($costResult['cost'] !== null) {
+            $totalBatchCost += $costResult['cost'];
+            $costedCount++;
+        }
 
         $ingredients[] = [
             'id' => (int)$ri['id'],
@@ -1258,8 +1293,9 @@ function handleGetRecipe($pdo) {
             'unit' => $ri['unit'],
             'unit_cost' => $unitCost,
             'cost_unit' => $costUnit,
-            'item_cost' => round($itemTotalCost, 2),
-            'has_cost' => ($matchedCost !== null && $unitCost > 0),
+            'item_cost' => $costResult['cost'] !== null ? round($costResult['cost'], 2) : null,
+            'cost_reason' => $costResult['reason'],
+            'has_cost' => ($costResult['cost'] !== null),
             'is_unmapped' => $isUnmapped
         ];
     }
@@ -1290,7 +1326,8 @@ function handleGetRecipe($pdo) {
 
     $yieldServings = max(1, (int)$recipe['yield_servings']);
     $costPerServing = round($totalBatchCost / (float)$yieldServings, 2);
-    $suggestedPriceFloor = round($costPerServing * 2.5, 2);
+    $suggestedPriceFloor = min((float)$dish['base_price'], round($costPerServing * 2.5, 2));
+    $costCoverage = "{$costedCount} of {$totalCount} ingredients costed";
 
     jsonResponse([
         'exists' => true,
@@ -1308,6 +1345,9 @@ function handleGetRecipe($pdo) {
         'total_batch_cost' => round($totalBatchCost, 2),
         'cost_per_serving' => $costPerServing,
         'suggested_price_floor' => $suggestedPriceFloor,
+        'cost_coverage' => $costCoverage,
+        'costed_count' => $costedCount,
+        'total_count' => $totalCount,
         'margin_multiplier' => 2.5
     ]);
 }
@@ -1320,9 +1360,43 @@ function handleSaveRecipe($pdo) {
         jsonResponse(['error' => 'Missing menu_item_id'], 400);
     }
     $menu_item_id = (int)$input['menu_item_id'];
-    $yield_servings = max(1, (int)($input['yield_servings'] ?? 1));
+
+    if (!isset($input['confirmed']) || $input['confirmed'] !== true) {
+        jsonResponse(['error' => 'Recipe must be confirmed by vendor.'], 422);
+    }
+
+    $yield_servings = (int)($input['yield_servings'] ?? 1);
+    if ($yield_servings < 1 || $yield_servings > 1000) {
+        jsonResponse(['error' => 'Yield servings must be between 1 and 1000.'], 422);
+    }
+
     $instructions = isset($input['instructions']) ? trim($input['instructions']) : '';
     $rawIngredients = isset($input['ingredients']) && is_array($input['ingredients']) ? $input['ingredients'] : [];
+
+    $allowedUnits = ['g', 'kg', 'ml', 'l', 'pc', 'tsp', 'tbsp', 'cup'];
+
+    foreach ($rawIngredients as $ing) {
+        $ingName = trim($ing['name'] ?? '');
+        if ($ingName === '') continue;
+
+        $unit = strtolower(trim($ing['unit'] ?? ''));
+        if (!in_array($unit, $allowedUnits, true)) {
+            jsonResponse(['error' => "Invalid ingredient unit '{$unit}'. Allowed units: " . implode(', ', $allowedUnits)], 422);
+        }
+
+        $qty = (float)($ing['quantity'] ?? 0);
+        if ($qty <= 0) {
+            jsonResponse(['error' => "Quantity must be greater than 0 for ingredient '{$ingName}'."], 422);
+        }
+
+        if (in_array($unit, ['g', 'ml'], true) && $qty > 50000) {
+            jsonResponse(['error' => "Quantity {$qty}{$unit} for '{$ingName}' exceeds limit of 50,000 for {$unit}."], 422);
+        } elseif (in_array($unit, ['kg', 'l'], true) && $qty > 50) {
+            jsonResponse(['error' => "Quantity {$qty}{$unit} for '{$ingName}' exceeds limit of 50 for {$unit}."], 422);
+        } elseif (!in_array($unit, ['g', 'ml', 'kg', 'l'], true) && $qty > 500) {
+            jsonResponse(['error' => "Quantity {$qty}{$unit} for '{$ingName}' exceeds limit of 500 for {$unit}."], 422);
+        }
+    }
 
     $stmtDish = $pdo->prepare("SELECT id, name FROM menu_items WHERE id = ? AND store_id = ?");
     $stmtDish->execute([$menu_item_id, $store_id]);
@@ -1334,21 +1408,23 @@ function handleSaveRecipe($pdo) {
     try {
         $pdo->beginTransaction();
 
+        $confirmedBy = $_SESSION['user_id'] ?? null;
         $stmtRecipe = $pdo->prepare("
-            INSERT INTO recipes (menu_item_id, yield_servings, instructions)
-            VALUES (?, ?, ?)
+            INSERT INTO recipes (menu_item_id, yield_servings, instructions, recipe_confirmed_by, recipe_confirmed_at)
+            VALUES (?, ?, ?, ?, NOW())
             ON DUPLICATE KEY UPDATE
                 yield_servings = VALUES(yield_servings),
-                instructions = VALUES(instructions)
+                instructions = VALUES(instructions),
+                recipe_confirmed_by = VALUES(recipe_confirmed_by),
+                recipe_confirmed_at = NOW()
         ");
-        $stmtRecipe->execute([$menu_item_id, $yield_servings, $instructions]);
+        $stmtRecipe->execute([$menu_item_id, $yield_servings, $instructions, $confirmedBy]);
 
         $stmtGetId = $pdo->prepare("SELECT id FROM recipes WHERE menu_item_id = ?");
         $stmtGetId->execute([$menu_item_id]);
         $recipeId = (int)$stmtGetId->fetchColumn();
 
         $pdo->prepare("DELETE FROM recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
-        $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$menu_item_id]);
 
         $savedIngredients = [];
         $mappedIngredientIds = [];
@@ -1358,16 +1434,16 @@ function handleSaveRecipe($pdo) {
             INSERT INTO recipe_ingredients (recipe_id, ingredient_id, ingredient_name, quantity, unit)
             VALUES (?, ?, ?, ?, ?)
         ");
-        $insertMenuItemIng = $pdo->prepare("
-            INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id)
-            VALUES (?, ?)
+        $insertSub = $pdo->prepare("
+            INSERT IGNORE INTO ingredient_submissions (raw_name, status, store_id)
+            VALUES (?, 'pending', ?)
         ");
 
         foreach ($rawIngredients as $ing) {
             $ingName = trim($ing['name'] ?? '');
             if ($ingName === '') continue;
             $qty = (float)($ing['quantity'] ?? 0);
-            $unit = trim($ing['unit'] ?? 'g');
+            $unit = strtolower(trim($ing['unit'] ?? 'g'));
 
             $stmtTax = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
             $stmtTax->execute([$ingName]);
@@ -1376,9 +1452,9 @@ function handleSaveRecipe($pdo) {
             $ingredientId = $taxId ? (int)$taxId : null;
             if ($ingredientId) {
                 $mappedIngredientIds[] = $ingredientId;
-                $insertMenuItemIng->execute([$menu_item_id, $ingredientId]);
             } else {
                 $hasUnmapped = true;
+                $insertSub->execute([$ingName, $store_id]);
             }
 
             $insertIng->execute([$recipeId, $ingredientId, $ingName, $qty, $unit]);
@@ -1389,6 +1465,25 @@ function handleSaveRecipe($pdo) {
                 'ingredient_id' => $ingredientId,
                 'is_unmapped' => ($ingredientId === null)
             ];
+        }
+
+        // H1 Critical Fix: Do NOT DELETE FROM menu_item_ingredients wholesale.
+        // Instead, compute the IDs of the submitted mapped ingredients. Delete only links that are not in the new submitted list.
+        // Use INSERT IGNORE to add the newly matched ones.
+        if (!empty($mappedIngredientIds)) {
+            $inClause = implode(',', array_fill(0, count($mappedIngredientIds), '?'));
+            $deleteOld = $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ? AND ingredient_id NOT IN ($inClause)");
+            $deleteOld->execute(array_merge([$menu_item_id], $mappedIngredientIds));
+
+            $insertMenuItemIng = $pdo->prepare("
+                INSERT IGNORE INTO menu_item_ingredients (menu_item_id, ingredient_id)
+                VALUES (?, ?)
+            ");
+            foreach ($mappedIngredientIds as $mid) {
+                $insertMenuItemIng->execute([$menu_item_id, $mid]);
+            }
+        } else {
+            $pdo->prepare("DELETE FROM menu_item_ingredients WHERE menu_item_id = ?")->execute([$menu_item_id]);
         }
 
         $pdo->prepare("DELETE FROM menu_item_critical_allergens WHERE menu_item_id = ?")->execute([$menu_item_id]);
@@ -1421,6 +1516,7 @@ function handleSaveRecipe($pdo) {
             'recipe_id' => $recipeId,
             'menu_item_id' => $menu_item_id,
             'yield_servings' => $yield_servings,
+            'recipe_confirmed_by' => $confirmedBy,
             'ingredients' => $savedIngredients,
             'allergens_preview' => array_values(array_unique($detectedAllergens)),
             'has_unmapped' => $hasUnmapped
@@ -1451,20 +1547,23 @@ function handleSuggestRecipe($pdo) {
         jsonResponse(['error' => 'Missing dish name for recipe suggestion', 'fallback' => true], 400);
     }
 
-    $sanitized = strtolower($dishName);
-    $md5Hash = md5($sanitized);
-    $cacheKeys = [
-        'recipe_' . $md5Hash,
-        md5('recipe:' . $sanitized),
-        $md5Hash,
-        'recipe:' . $md5Hash,
-        'recipe:' . $sanitized,
-        $sanitized
-    ];
+    $rawExisting = isset($input['ingredients']) && is_array($input['ingredients']) 
+        ? $input['ingredients'] 
+        : (isset($input['existing_ingredients']) && is_array($input['existing_ingredients']) ? $input['existing_ingredients'] : []);
 
-    $inClause = implode(',', array_fill(0, count($cacheKeys), '?'));
-    $stmtCache = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name IN ($inClause) LIMIT 1");
-    $stmtCache->execute($cacheKeys);
+    $existingIngredientsList = [];
+    foreach ($rawExisting as $item) {
+        $n = is_array($item) ? trim($item['name'] ?? '') : trim($item);
+        if ($n !== '') $existingIngredientsList[] = $n;
+    }
+
+    // In PHP sort modifies in place
+    $sortedList = $existingIngredientsList;
+    sort($sortedList);
+    $cacheKey = 'recipe_suggest_' . md5(json_encode($sortedList));
+
+    $stmtCache = $pdo->prepare("SELECT response_payload FROM ai_query_cache WHERE dish_name IN (?, ?) LIMIT 1");
+    $stmtCache->execute([$cacheKey, 'recipe_' . md5(strtolower($dishName))]);
     $cached = $stmtCache->fetch(PDO::FETCH_ASSOC);
 
     if ($cached && !empty($cached['response_payload'])) {
@@ -1501,11 +1600,18 @@ Schema:
 }
 RULES:
 1. 'unit' MUST strictly be one of: ['g', 'kg', 'ml', 'l', 'pc', 'tbsp', 'tsp', 'cup']. Any other unit is forbidden.
-2. If the dish name is gibberish or not food, return JSON: {\"error\": \"Invalid food item\"}.
-3. Break down composite ingredients into raw culinary staples.";
+2. 'quantity' caps: g/ml <= 50000, kg/l <= 50, other units <= 500.
+3. 'yield_servings' MUST be between 1 and 1000.
+4. If an ingredient list is provided, ONLY include ingredients from that list. Do NOT invent new ingredients.
+5. If the dish name is gibberish or not food, return JSON: {\"error\": \"Invalid food item\"}.";
 
     $userPrompt = "Generate institutional recipe for dish: " . $dishName;
-    $geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . urlencode($apiKey);
+    if (!empty($existingIngredientsList)) {
+        $userPrompt .= "\nApproved ingredient list: " . implode(', ', $existingIngredientsList);
+    }
+
+    $modelName = defined('GEMINI_MODEL') ? GEMINI_MODEL : 'gemini-3.5-flash';
+    $geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/{$modelName}:generateContent?key=" . urlencode($apiKey);
 
     $payload = [
         "contents" => [
@@ -1549,23 +1655,58 @@ RULES:
     $aiJson = json_decode(trim($text), true);
     if (!$aiJson || !empty($aiJson['error']) || empty($aiJson['ingredients']) || !is_array($aiJson['ingredients'])) {
         jsonResponse([
-            'error' => 'AI generated invalid recipe structure.',
+            'error' => $aiJson['error'] ?? 'Could not recognize dish as food.',
             'fallback' => true
-        ], 503);
+        ], 422);
     }
+
+    // Validate AI output strictly against M3 unit/quantity bounds and drop any unprompted ingredients
+    $validatedIngredients = [];
+    $allowedNamesLower = !empty($existingIngredientsList) ? array_map('strtolower', $existingIngredientsList) : [];
 
     foreach ($aiJson['ingredients'] as $ing) {
+        $name = trim($ing['name'] ?? '');
+        if ($name === '') continue;
+
+        // Drop any ingredient names the AI invents that weren't in the original prompt
+        if (!empty($allowedNamesLower) && !in_array(strtolower($name), $allowedNamesLower, true)) {
+            continue;
+        }
+
         $unit = strtolower(trim($ing['unit'] ?? ''));
         if (!in_array($unit, $allowedUnits, true)) {
-            jsonResponse([
-                'error' => "AI generated unsupported unit '{$unit}'. Please enter recipe manually.",
-                'fallback' => true
-            ], 503);
+            continue;
         }
+
+        $qty = (float)($ing['quantity'] ?? 0);
+        if ($qty <= 0) continue;
+
+        // Quantity caps (g/ml <= 50000, kg/l <= 50, others <= 500)
+        if (in_array($unit, ['g', 'ml'], true)) {
+            $qty = min(50000.0, $qty);
+        } elseif (in_array($unit, ['kg', 'l'], true)) {
+            $qty = min(50.0, $qty);
+        } else {
+            $qty = min(500.0, $qty);
+        }
+
+        $validatedIngredients[] = [
+            'name' => $name,
+            'quantity' => $qty,
+            'unit' => $unit
+        ];
     }
 
-    $cacheStmt = $pdo->prepare("INSERT IGNORE INTO ai_query_cache (dish_name, response_payload) VALUES (?, ?)");
-    $cacheStmt->execute(['recipe_' . $md5Hash, json_encode($aiJson)]);
+    $yieldServings = max(1, min(1000, (int)($aiJson['yield_servings'] ?? 10)));
+    $aiJson['yield_servings'] = $yieldServings;
+    $aiJson['ingredients'] = $validatedIngredients;
+
+    $cacheStmt = $pdo->prepare("
+        INSERT INTO ai_query_cache (dish_name, response_payload, created_at)
+        VALUES (?, ?, NOW())
+        ON DUPLICATE KEY UPDATE response_payload = VALUES(response_payload), created_at = NOW()
+    ");
+    $cacheStmt->execute([$cacheKey, json_encode($aiJson)]);
 
     jsonResponse([
         'success' => true,
@@ -1607,11 +1748,12 @@ function handleGetPrepPlan($pdo) {
 
     $combinedMap = [];
     $dishesBreakdown = [];
+    $needsRecipe = [];
     $totalPlannedServings = 0;
 
     foreach ($requestedItems as $req) {
         $menuItemId = (int)($req['menu_item_id'] ?? 0);
-        $plannedServings = max(1, (int)($req['servings'] ?? 10));
+        $plannedServings = min(1000, max(1, (int)($req['servings'] ?? 10)));
         if ($menuItemId <= 0) continue;
 
         $stmtDish = $pdo->prepare("SELECT id, name FROM menu_items WHERE id = ? AND store_id = ?");
@@ -1619,35 +1761,32 @@ function handleGetPrepPlan($pdo) {
         $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
         if (!$dish) continue;
 
-        $totalPlannedServings += $plannedServings;
-
         $stmtRecipe = $pdo->prepare("SELECT * FROM recipes WHERE menu_item_id = ?");
         $stmtRecipe->execute([$menuItemId]);
         $recipe = $stmtRecipe->fetch(PDO::FETCH_ASSOC);
 
-        $yieldServings = $recipe ? max(1, (int)$recipe['yield_servings']) : 1;
+        if (!$recipe) {
+            // M4: Do not fabricate "1 pc" for dishes without a recipe. Omit their math and append to needs_recipe.
+            $needsRecipe[] = [
+                'menu_item_id' => $menuItemId,
+                'name' => $dish['name'],
+                'planned_servings' => $plannedServings
+            ];
+            continue;
+        }
+
+        $totalPlannedServings += $plannedServings;
+        $yieldServings = max(1, (int)$recipe['yield_servings']);
         $scaleFactor = (float)$plannedServings / (float)$yieldServings;
 
-        $dishIngredients = [];
-        if ($recipe) {
-            $stmtIngs = $pdo->prepare("
-                SELECT ri.*, i.name as canonical_name
-                FROM recipe_ingredients ri
-                LEFT JOIN ingredients i ON ri.ingredient_id = i.id
-                WHERE ri.recipe_id = ?
-            ");
-            $stmtIngs->execute([$recipe['id']]);
-            $dishIngredients = $stmtIngs->fetchAll(PDO::FETCH_ASSOC);
-        } else {
-            $stmtFallback = $pdo->prepare("
-                SELECT mi.ingredient_id, i.name as ingredient_name, 1 as quantity, 'pc' as unit, i.name as canonical_name
-                FROM menu_item_ingredients mi
-                JOIN ingredients i ON mi.ingredient_id = i.id
-                WHERE mi.menu_item_id = ?
-            ");
-            $stmtFallback->execute([$menuItemId]);
-            $dishIngredients = $stmtFallback->fetchAll(PDO::FETCH_ASSOC);
-        }
+        $stmtIngs = $pdo->prepare("
+            SELECT ri.*, i.name as canonical_name
+            FROM recipe_ingredients ri
+            LEFT JOIN ingredients i ON ri.ingredient_id = i.id
+            WHERE ri.recipe_id = ?
+        ");
+        $stmtIngs->execute([$recipe['id']]);
+        $dishIngredients = $stmtIngs->fetchAll(PDO::FETCH_ASSOC);
 
         $dishesBreakdown[] = [
             'menu_item_id' => $menuItemId,
@@ -1655,7 +1794,7 @@ function handleGetPrepPlan($pdo) {
             'planned_servings' => $plannedServings,
             'yield_servings' => $yieldServings,
             'scale_factor' => round($scaleFactor, 2),
-            'has_recipe' => (bool)$recipe
+            'has_recipe' => true
         ];
 
         foreach ($dishIngredients as $ing) {
@@ -1767,6 +1906,7 @@ function handleGetPrepPlan($pdo) {
         'total_dishes' => count($dishesBreakdown),
         'total_servings' => $totalPlannedServings,
         'dishes' => $dishesBreakdown,
+        'needs_recipe' => $needsRecipe,
         'prep_list' => $prepList
     ]);
 }

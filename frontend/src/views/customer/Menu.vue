@@ -72,7 +72,7 @@
              class="bg-red-600 text-white text-xs font-black px-3.5 py-2 flex items-center justify-between shadow-md relative z-10">
           <div class="flex items-center gap-1.5 truncate">
             <AlertTriangle :size="15" class="shrink-0 text-red-100 animate-pulse" />
-            <span class="truncate uppercase tracking-wide">⚠️ CONTAINS YOUR ALLERGEN: {{ getDietaryConflicts(item).criticalAllergens.join(', ') }}</span>
+            <span class="truncate uppercase tracking-wide">CONTAINS YOUR ALLERGEN: {{ getDietaryConflicts(item).criticalAllergens.join(', ') }}</span>
           </div>
         </div>
         <div v-else-if="getDietaryConflicts(item).hasSensitivity" 
@@ -325,7 +325,7 @@
                   :disabled="!canAddSelectedItem">
             <template v-if="selectedItem.stock <= 0">Sold Out</template>
             <template v-else-if="getDietaryConflicts(selectedItem).hasCriticalAllergen && !dishRiskOverride">
-              ⚠️ Allergen Restricted (Check Override)
+              <span class="inline-flex items-center gap-1"><AlertTriangle :size="16" class="text-amber-300 inline" /> Allergen Restricted (Check Override)</span>
             </template>
             <template v-else-if="getDietaryConflicts(selectedItem).hasCriticalAllergen && dishRiskOverride">
               Add to Plate (Risk Overridden) &bull; ₱{{ (selectedItem.current_price * quantity).toFixed(2) }}
@@ -384,7 +384,7 @@
               v-if="evictionNotice.show" 
               class="mb-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-2.5 text-xs flex items-start gap-2 shadow-sm"
             >
-              <span class="text-amber-600 font-bold">ⓘ</span>
+              <Info :size="14" class="text-amber-600 shrink-0 mt-0.5" />
               <div class="flex-1">
                 <p class="font-semibold text-amber-800">Item no longer available</p>
                 <p class="text-[11px] text-amber-700 leading-tight">
@@ -395,7 +395,7 @@
                 @click="evictionNotice.show = false" 
                 class="text-amber-500 hover:text-amber-700 text-sm font-bold leading-none"
               >
-                ×
+                <X :size="14" />
               </button>
             </div>
           </transition>

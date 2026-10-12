@@ -79,14 +79,12 @@ class PricingEngine {
 
         $discountPercent = self::getActiveDiscountPercent($settings, $current_timestamp_str);
 
-        if ($discountPercent <= 0) {
-            return round($basePrice, 2);
-        }
-
         // Stepped, non-compounding discount
-        $calculatedPrice = round($basePrice * (1 - ($discountPercent / 100)), 2);
+        $discountedPrice = $discountPercent > 0 
+            ? round($basePrice * (1 - ($discountPercent / 100)), 2)
+            : $basePrice;
 
-        // Strict price floor enforcement
-        return max($priceFloor, $calculatedPrice);
+        // Strict price floor enforcement bounded by base price
+        return min((float)$basePrice, max((float)$priceFloor, (float)$discountedPrice));
     }
 }

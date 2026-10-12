@@ -112,8 +112,8 @@
 
         <!-- Food Safety Freshness Batch Controls -->
         <div class="flex items-center gap-3 bg-amber-50/80 border border-amber-200 rounded-xl px-3.5 py-1.5 text-xs shadow-sm">
-          <span class="font-bold text-amber-900 flex items-center gap-1">
-            <span>🛡️</span> Food Safety:
+          <span class="font-bold text-amber-900 flex items-center gap-1.5">
+            <Shield class="w-4 h-4 text-emerald-600 inline" /> Food Safety:
           </span>
           <div class="flex items-center gap-1.5">
             <label class="text-[11px] font-semibold text-slate-500">Cooked:</label>
@@ -135,9 +135,11 @@
         </div>
       </div>
 
-      <button @click="launchMenu" :disabled="!activeRoster.some(r => r.selected) || launchState === 'success'" class="px-8 py-3 rounded-xl font-black text-lg shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      <button @click="launchMenu" :disabled="!activeRoster.some(r => r.selected) || launchState === 'success'" class="px-8 py-3 rounded-xl font-black text-lg shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               :class="launchState === 'success' ? 'bg-slate-700 text-white cursor-default' : 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-xl active:scale-95'">
-        {{ launchState === 'success' ? 'Lineup Active ✓' : 'Launch Live Menu 🚀' }}
+        <Check v-if="launchState === 'success'" class="w-5 h-5" />
+        <Rocket v-else class="w-5 h-5" />
+        <span>{{ launchState === 'success' ? 'Lineup Active' : 'Launch Live Menu' }}</span>
       </button>
     </div>
 
@@ -181,7 +183,7 @@
 
             <!-- AI Kill Switch Warning Banner -->
             <div v-if="aiDisabled" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs flex items-center gap-2 mb-2">
-              <span class="text-base">⚠️</span>
+              <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0" />
               <span class="font-medium">{{ aiDisabledMessage || 'AI Generation is currently disabled by the Administrator.' }}</span>
             </div>
 
@@ -196,8 +198,11 @@
                     : 'bg-indigo-50 text-indigo-600 border-indigo-200 hover:bg-indigo-100 disabled:opacity-50'
                 ]"
               >
-                 <span v-if="isEnriching" class="animate-spin text-indigo-500">⏳</span>
-                 <span v-else>{{ aiDisabled ? '🔒' : '✨' }}</span>
+                 <Loader2 v-if="isEnriching" class="w-4 h-4 animate-spin text-indigo-500" />
+                 <template v-else>
+                   <Lock v-if="aiDisabled" class="w-4 h-4" />
+                   <Sparkles v-else class="w-4 h-4 text-amber-400" />
+                 </template>
                  {{ isEnriching ? 'Analyzing...' : (aiDisabled ? 'AI Disabled' : 'Auto-fill with AI') }}
               </button>
             </div>
@@ -340,7 +345,7 @@
           <div class="p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-xl shadow-lg border border-slate-700">
             <div class="flex items-center justify-between mb-3 border-b border-slate-700/80 pb-2.5">
               <div class="flex items-center gap-2">
-                <span class="text-base">📊</span>
+                <BarChart3 class="w-4 h-4 text-indigo-400 inline" />
                 <h4 class="text-xs font-black uppercase tracking-wider text-slate-200">
                   Food Cost & Margin Engine (2.5x Markup)
                 </h4>
@@ -364,7 +369,7 @@
               </div>
 
               <div class="bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/30">
-                <div class="text-[10px] font-bold text-emerald-400 uppercase">Suggested Floor</div>
+                <div class="text-[10px] font-bold text-emerald-400 uppercase">Suggested floor (cost x 2.5)</div>
                 <div class="text-xl font-black text-emerald-400 mt-0.5">₱{{ (recipeForm.suggested_price_floor || 0).toFixed(2) }}</div>
                 <div class="text-[10px] text-emerald-300/80 mt-0.5">Cost × 2.5</div>
               </div>
@@ -553,6 +558,23 @@
             </div>
           </div>
 
+          <!-- Dishes without Recipe Warning Banner -->
+          <div v-if="prepPlanData.needs_recipe && prepPlanData.needs_recipe.length > 0" class="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+            <div class="flex items-center gap-2 text-xs font-bold text-amber-800 uppercase tracking-wide">
+              <AlertTriangle class="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span>Dishes Requiring Recipes</span>
+            </div>
+            <div class="space-y-1.5">
+              <div v-for="dish in prepPlanData.needs_recipe" :key="dish.menu_item_id" class="flex items-center justify-between text-xs text-amber-900 bg-white/70 px-3 py-2 rounded-lg border border-amber-200/60">
+                <span class="font-bold">{{ dish.name }}</span>
+                <span class="font-semibold text-amber-700 flex items-center gap-1.5">
+                  <AlertTriangle class="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                  No recipe - not included in totals
+                </span>
+              </div>
+            </div>
+          </div>
+
           <div class="border border-slate-200 rounded-xl overflow-hidden">
             <table class="w-full text-left text-sm whitespace-nowrap">
               <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase tracking-wider">
@@ -628,7 +650,7 @@
 
 <script setup>
 import { ref, onMounted, reactive, watch } from 'vue'
-import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check } from 'lucide-vue-next'
+import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useCatalog } from '../../stores/dishCatalog'
 import { useSandbox } from '../../stores/sandbox'
@@ -1083,6 +1105,7 @@ const saveRecipe = async () => {
       menu_item_id: recipeDish.value.id,
       yield_servings: recipeForm.yield_servings,
       instructions: recipeForm.instructions,
+      confirmed: true,
       ingredients: recipeForm.ingredients.map(i => ({
         name: i.name,
         quantity: i.quantity,

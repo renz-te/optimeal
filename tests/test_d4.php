@@ -119,6 +119,7 @@ echo "\n--- TEST STEP 2: Save Recipe (250g Chicken, Yield 1 serving) ---\n";
 $saveRecipeRes = apiRequest("$baseUrl/vendor/dish/recipe", 'POST', [
     'menu_item_id' => $dishId,
     'yield_servings' => 1,
+    'confirmed' => true,
     'instructions' => 'Roast at 180C',
     'ingredients' => [
         [
@@ -170,6 +171,7 @@ apiRequest("$baseUrl/vendor/ingredient-costs", 'POST', [
 apiRequest("$baseUrl/vendor/dish/recipe", 'POST', [
     'menu_item_id' => $dishId,
     'yield_servings' => 1,
+    'confirmed' => true,
     'instructions' => 'Roast with salt',
     'ingredients' => [
         ['name' => 'Chicken', 'quantity' => 250, 'unit' => 'g'],
@@ -191,6 +193,7 @@ if ($incCost === 50.00) {
 apiRequest("$baseUrl/vendor/dish/recipe", 'POST', [
     'menu_item_id' => $dishId,
     'yield_servings' => 1,
+    'confirmed' => true,
     'instructions' => 'Roast at 180C',
     'ingredients' => [['name' => 'Chicken', 'quantity' => 250, 'unit' => 'g']]
 ], $cookieVendor);

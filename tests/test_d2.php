@@ -123,6 +123,7 @@ echo "--- TEST 4: Recipe Save Confirmation & Allergen Preview ---\n";
 $recipePayload1 = [
     'menu_item_id' => 1, // Chicken Adobo
     'yield_servings' => 10,
+    'confirmed' => true,
     'instructions' => 'Simmer chicken thigh in soy sauce and vinegar with garlic until tender.',
     'ingredients' => [
         ['name' => 'Chicken Thigh', 'quantity' => 1.5, 'unit' => 'kg'],
@@ -162,6 +163,7 @@ echo "--- TEST 6: Prep Plan Combination Math & Unit Conversion ---\n";
 $recipePayload2 = [
     'menu_item_id' => 2, // Pork Sinigang
     'yield_servings' => 10,
+    'confirmed' => true,
     'instructions' => 'Boil ribs with tamarind broth, garlic, and seasoning.',
     'ingredients' => [
         ['name' => 'Pork Ribs', 'quantity' => 1.2, 'unit' => 'kg'],

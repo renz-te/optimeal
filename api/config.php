@@ -8,3 +8,7 @@ if (file_exists($envPath)) {
         putenv(trim($name) . '=' . trim($value));
     }
 }
+
+if (!defined('GEMINI_MODEL')) {
+    define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.5-flash');
+}

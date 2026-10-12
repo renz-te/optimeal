@@ -53,7 +53,7 @@ function expireUnclaimedOrdersAfterClosing($pdo) {
     }
 }
 
-function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now') {
+function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now', $openingTimeStr = null) {
     date_default_timezone_set('Asia/Manila');
     $tz = new DateTimeZone('Asia/Manila');
     
@@ -66,23 +66,43 @@ function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now') {
     $closingStr = !empty($closingTimeStr) ? trim($closingTimeStr) : '20:00';
     $closing = new DateTime($now->format('Y-m-d') . ' ' . $closingStr, $tz);
 
+    $openingStr = !empty($openingTimeStr) ? trim($openingTimeStr) : '06:00';
+    $opening = new DateTime($now->format('Y-m-d') . ' ' . $openingStr, $tz);
+
+    // If closing_time crosses midnight (e.g., closes at 02:00 but opens at 08:00),
+    // overnight hours across midnight are unsupported. Return empty array.
+    if ($closing < $opening) {
+        return [];
+    }
+
     // If current time is already at or past closing time today, return empty array
     if ($now >= $closing) {
         return [];
     }
 
-    // Round up to the next 15-minute boundary
-    $currentMinutes = (int)$now->format('i');
-    $currentSeconds = (int)$now->format('s');
-    $remainder = $currentMinutes % 15;
-    
-    $minutesToAdd = (15 - $remainder);
-    if ($remainder === 0 && $currentSeconds === 0) {
-        $minutesToAdd = 15;
-    }
+    // Generate slots starting from max($now, $opening_time)
+    if ($now < $opening) {
+        $slotTime = clone $opening;
+        $slotMinutes = (int)$slotTime->format('i');
+        $rem = $slotMinutes % 15;
+        if ($rem !== 0) {
+            $slotTime->modify('+' . (15 - $rem) . ' minutes');
+        }
+        $slotTime->setTime((int)$slotTime->format('H'), (int)$slotTime->format('i'), 0);
+    } else {
+        // Round up to the next 15-minute boundary
+        $currentMinutes = (int)$now->format('i');
+        $currentSeconds = (int)$now->format('s');
+        $remainder = $currentMinutes % 15;
+        
+        $minutesToAdd = (15 - $remainder);
+        if ($remainder === 0 && $currentSeconds === 0) {
+            $minutesToAdd = 15;
+        }
 
-    $slotTime = (clone $now)->modify("+{$minutesToAdd} minutes");
-    $slotTime->setTime((int)$slotTime->format('H'), (int)$slotTime->format('i'), 0);
+        $slotTime = (clone $now)->modify("+{$minutesToAdd} minutes");
+        $slotTime->setTime((int)$slotTime->format('H'), (int)$slotTime->format('i'), 0);
+    }
 
     $slots = [];
     while ($slotTime <= $closing) {
@@ -97,11 +117,13 @@ function handleGetPickupSlots($pdo) {
     date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
     $closingTime = $settings['closing_time'] ?? '20:00';
+    $openingTime = $settings['opening_time'] ?? '06:00';
     
-    $slots = generatePickupSlots($closingTime, 'now');
+    $slots = generatePickupSlots($closingTime, 'now', $openingTime);
     
     jsonResponse([
         'closing_time' => $closingTime,
+        'opening_time' => $openingTime,
         'current_time' => date('H:i'),
         'slots' => $slots
     ]);
@@ -192,6 +214,22 @@ function handleGetMenu($pdo) {
         ");
         $istmt->execute([$item['id']]);
         $ingredients = $istmt->fetchAll(PDO::FETCH_COLUMN);
+
+        // H1: Fetch unmapped ingredients from recipe_ingredients (where ingredient_id IS NULL)
+        $unmappedStmt = $pdo->prepare("
+            SELECT ri.ingredient_name
+            FROM recipe_ingredients ri
+            JOIN recipes r ON ri.recipe_id = r.id
+            WHERE r.menu_item_id = ? AND ri.ingredient_id IS NULL
+        ");
+        $unmappedStmt->execute([$item['id']]);
+        $unmappedNames = $unmappedStmt->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($unmappedNames as $uName) {
+            $formatted = trim($uName) . " (Not in allergen list - review)";
+            if (!in_array($formatted, $ingredients, true)) {
+                $ingredients[] = $formatted;
+            }
+        }
         
         // Parse dietary JSON
         $dietary = [];
@@ -407,6 +445,40 @@ function handleCreateReservation($pdo) {
         }
     }
 
+    date_default_timezone_set('Asia/Manila');
+    $tz = new DateTimeZone('Asia/Manila');
+    $now = new DateTime('now', $tz);
+    $closingTime = $settings['closing_time'] ?? '20:00';
+    $openingTime = $settings['opening_time'] ?? '06:00';
+
+    $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
+        ? $input['fulfillment_type'] 
+        : 'dine_in';
+
+    $pickup_time = null;
+    $pickupDateTime = null;
+    if ($fulfillment_type === 'take_out') {
+        $pickup_time = !empty($input['pickup_time']) ? trim($input['pickup_time']) : null;
+        if (empty($pickup_time)) {
+            jsonResponse(['error' => 'Please select a pickup time slot for take-out orders.'], 400);
+        }
+        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $pickup_time)) {
+            jsonResponse(['error' => 'Invalid pickup time format. Must be HH:MM.'], 400);
+        }
+
+        // Validate that pickup_time is present in generatePickupSlots output
+        $availableSlots = generatePickupSlots($closingTime, 'now', $openingTime);
+        if (!in_array($pickup_time, $availableSlots, true)) {
+            jsonResponse(['error' => 'Selected pickup time slot is not available or past cafeteria hours.'], 422);
+        }
+
+        // Validate pickup_time >= NOW()
+        $pickupDateTime = new DateTime($now->format('Y-m-d') . ' ' . $pickup_time, $tz);
+        if ($pickupDateTime < $now) {
+            jsonResponse(['error' => 'Pickup time must be in the future.'], 422);
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         $total_amount = 0;
@@ -416,32 +488,32 @@ function handleCreateReservation($pdo) {
             $checkToken = $pdo->prepare("SELECT 1 FROM orders WHERE store_id = ? AND claim_token = ? AND status IN ('pending', 'ready', 'reserved', 'paid')");
             $checkToken->execute([$store_id, $claimToken]);
         } while ($checkToken->fetchColumn());
-        
-        $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
-            ? $input['fulfillment_type'] 
-            : 'dine_in';
 
-        $pickup_time = null;
-        if ($fulfillment_type === 'take_out') {
-            $pickup_time = !empty($input['pickup_time']) ? trim($input['pickup_time']) : null;
-            if (empty($pickup_time)) {
-                jsonResponse(['error' => 'Please select a pickup time slot for take-out orders.'], 400);
-            }
-            if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $pickup_time)) {
-                jsonResponse(['error' => 'Invalid pickup time format. Must be HH:MM.'], 400);
-            }
+        // Order Expiry (TTL): Calculate expiry as max(standard_ttl_time, pickup_slot_time), but capped at closing_time.
+        $reservationTtl = isset($settings['reservation_ttl']) ? max(1, (int)$settings['reservation_ttl']) : 30;
+        $standardTtlTime = (clone $now)->modify("+{$reservationTtl} minutes");
+
+        if ($fulfillment_type === 'take_out' && $pickupDateTime) {
+            $expiryTime = ($pickupDateTime > $standardTtlTime) ? clone $pickupDateTime : clone $standardTtlTime;
+        } else {
+            $expiryTime = clone $standardTtlTime;
         }
 
-        $reservationTtl = isset($settings['reservation_ttl']) ? max(1, (int)$settings['reservation_ttl']) : 30;
+        $closingDateTime = new DateTime($now->format('Y-m-d') . ' ' . $closingTime, $tz);
+        if ($expiryTime > $closingDateTime) {
+            $expiryTime = clone $closingDateTime;
+        }
+        $expiryTimeFormatted = $expiryTime->format('Y-m-d H:i:s');
+
         $insertOrder = $pdo->prepare("
             INSERT INTO orders (
                 user_id, store_id, status, ttl_expires_at, claim_token, 
                 fulfillment_type, pickup_time, notification_status, 
                 allergen_override, allergen_conflicts
-            ) VALUES (?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL ? MINUTE), ?, ?, ?, 'none', ?, ?)
+            ) VALUES (?, ?, 'reserved', ?, ?, ?, ?, 'none', ?, ?)
         ");
         $insertOrder->execute([
-            $user_id, $store_id, $reservationTtl, $claimToken, 
+            $user_id, $store_id, $expiryTimeFormatted, $claimToken, 
             $fulfillment_type, $pickup_time, $isAllergenOverride, $allergenConflictsJson
         ]);
         $order_id = $pdo->lastInsertId();
@@ -471,16 +543,18 @@ function handleCreateReservation($pdo) {
             $availableQty = $itemData ? max(0, (int)$itemData['online_pool_qty']) : 0;
 
             if (!$itemData || $availableQty < $qty) {
-                throw new Exception("Out of stock: Only {$availableQty} portions of {$dishName} remaining.");
+                throw new Exception("Out of stock: Only {$availableQty} portions of {$dishName} remaining.", 400);
             }
 
             // Food Safety Enforcement: Check sell_by in Asia/Manila
             if (!empty($itemData['sell_by'])) {
-                date_default_timezone_set('Asia/Manila');
-                $now = time();
-                $sellByTimestamp = strtotime($itemData['sell_by']);
-                if ($now >= $sellByTimestamp) {
-                    throw new Exception("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.");
+                $sellByDateTime = new DateTime($itemData['sell_by'], $tz);
+                if ($now >= $sellByDateTime) {
+                    throw new Exception("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.", 422);
+                }
+                // Pickup time must be <= sell_by of all requested items
+                if ($fulfillment_type === 'take_out' && $pickupDateTime && $pickupDateTime > $sellByDateTime) {
+                    throw new Exception("Pickup time ({$pickup_time}) exceeds safe sell-by time for '{$dishName}' ({$itemData['sell_by']}).", 422);
                 }
             }
 
@@ -497,7 +571,7 @@ function handleCreateReservation($pdo) {
                 $claimed = $checkClaims->fetchColumn() ?: 0;
                 $maxDiscountQty = isset($settings['max_discount_qty']) ? (int)$settings['max_discount_qty'] : 5;
                 if ($claimed + $qty > $maxDiscountQty) {
-                    throw new Exception("Daily discount claim limit exceeded for item $item_id");
+                    throw new Exception("Daily discount claim limit exceeded for item $item_id", 422);
                 }
                 $upsertClaims->execute([$user_id, $item_id, $qty, $qty]);
             }
@@ -520,7 +594,7 @@ function handleCreateReservation($pdo) {
 
             $updateInventory->execute([$qty, $qty, $item_id, $qty]);
             if ($updateInventory->rowCount() === 0) {
-                throw new Exception("Out of stock: Only 0 portions of {$dishName} remaining.");
+                throw new Exception("Out of stock: Only 0 portions of {$dishName} remaining.", 400);
             }
         }
 
@@ -529,8 +603,11 @@ function handleCreateReservation($pdo) {
         $pdo->commit();
         jsonResponse(['message' => 'Reservation created', 'order_id' => $order_id, 'total_amount' => $total_amount, 'claim_token' => $claimToken]);
     } catch (Exception $e) {
-        $pdo->rollBack();
-        jsonResponse(['error' => $e->getMessage()], 400);
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 600) ? (int)$e->getCode() : 422;
+        jsonResponse(['error' => $e->getMessage()], $code);
     }
 }
 

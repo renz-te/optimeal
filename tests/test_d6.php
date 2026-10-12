@@ -124,6 +124,7 @@ echo "\n--- TEST STEP 3: Student Take-Out Checkout Validation ---\n";
 $dishStmt = $pdo->query("SELECT id FROM menu_items WHERE store_id = 1 AND is_active = 1 LIMIT 1");
 $dishId = (int)$dishStmt->fetchColumn();
 $pdo->prepare("UPDATE inventory SET online_pool_qty = 20, sell_by = DATE_ADD(NOW(), INTERVAL 4 HOUR), cooked_at = NOW(), delisted_from_app = 0 WHERE menu_item_id = ?")->execute([$dishId]);
+$pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
 
 // Attempt 1: Take-out WITHOUT pickup_time
 $noSlotRes = apiRequest("$baseUrl/reservations", 'POST', [
@@ -158,8 +159,8 @@ if ($invalidSlotRes['status'] === 400 && $invalidSlotRes['data']['error'] === 'I
     exit(1);
 }
 
-// Attempt 3: Valid Take-Out with pickup_time = '14:15'
-$targetPickupTime = '14:15';
+// Attempt 3: Valid Take-Out with first available slot
+$targetPickupTime = $slotEndpointRes['data']['slots'][0] ?? '14:30';
 $validOrderRes = apiRequest("$baseUrl/reservations", 'POST', [
     'fulfillment_type' => 'take_out',
     'pickup_time' => $targetPickupTime,
@@ -243,6 +244,16 @@ if ($directWebRes['status'] === 403 || $directWebRes['status'] === 404) {
     echo "✗ Direct web access check failed: HTTP {$directWebRes['status']}\n";
     exit(1);
 }
+
+// L4 Hygiene: Cleanup created order and cookies
+if (!empty($orderId)) {
+    $pdo->prepare("DELETE FROM order_items WHERE order_id = ?")->execute([$orderId]);
+    $pdo->prepare("DELETE FROM payments WHERE order_id = ?")->execute([$orderId]);
+    $pdo->prepare("DELETE FROM orders WHERE id = ?")->execute([$orderId]);
+    $pdo->prepare("DELETE FROM daily_discount_claims WHERE menu_item_id = ? AND claim_date = CURDATE()")->execute([$dishId]);
+}
+if (file_exists($cookieVendor)) @unlink($cookieVendor);
+if (file_exists($cookieStudent)) @unlink($cookieStudent);
 
 echo "\n============================================\n";
 echo "✓ ALL PHASE D6 VERIFICATIONS PASSED CLEANLY!\n";
