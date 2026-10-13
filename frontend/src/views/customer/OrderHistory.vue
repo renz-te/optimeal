@@ -343,7 +343,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   Clock, RefreshCw, Utensils, ShoppingBag, Package, Calendar,
   KeyRound, Receipt, Archive, CheckCircle2, AlertTriangle, X, UtensilsCrossed
@@ -360,6 +360,7 @@ const loading = ref(false)
 const convertingToken = ref(null)
 const toastMessage = ref('')
 const toastType = ref('success')
+let pollInterval = null
 
 // Split into active vs past orders per phase criteria:
 // Active: reserved, paid
@@ -462,5 +463,13 @@ const getPastStatusBadgeClass = (status) => {
 
 onMounted(() => {
   fetchOrders()
+  pollInterval = setInterval(fetchOrders, 20000)
+})
+
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
 })
 </script>

@@ -164,7 +164,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { AlertTriangle, Check, Bell, UtensilsCrossed } from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
 
@@ -179,6 +179,7 @@ const activeTab = ref('Pending Pickup')
 const localOrders = ref([])
 const actionError = ref('')
 const isNotifyingId = ref(null)
+let pollInterval = null
 
 // Allergen Modal State
 const showAllergenModal = ref(false)
@@ -237,6 +238,14 @@ const fetchOrders = async () => {
 
 onMounted(() => {
   fetchOrders()
+  pollInterval = setInterval(fetchOrders, 20000)
+})
+
+onUnmounted(() => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
 })
 
 const updateOrderStatus = async (orderId, newStatus, confirmAllergen = false) => {
