@@ -694,13 +694,14 @@
                 <tr>
                   <th class="px-4 py-3">Ingredient</th>
                   <th class="px-4 py-3 text-right">Required Quantity</th>
+                  <th class="px-4 py-3 text-right">Est. Cost</th>
                   <th class="px-4 py-3">Used In Dishes</th>
                   <th class="px-4 py-3 text-center">Taxonomy</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
                 <tr v-if="!prepPlanData.prep_list || prepPlanData.prep_list.length === 0">
-                  <td colspan="4" class="text-center py-8 text-slate-400 font-medium">
+                  <td colspan="5" class="text-center py-8 text-slate-400 font-medium">
                     No ingredients in prep plan. Select dishes or add recipes to see requirements.
                   </td>
                 </tr>
@@ -710,6 +711,15 @@
                   </td>
                   <td class="px-4 py-3 text-right font-black text-emerald-700">
                     {{ item.total_quantity }} {{ item.unit }}
+                  </td>
+                  <td class="px-4 py-3 text-right font-mono">
+                    <span v-if="item.has_price && item.estimated_cost !== null" class="font-bold text-slate-800">
+                      ₱{{ Number(item.estimated_cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+                    </span>
+                    <span v-else class="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      <AlertTriangle :size="10" />
+                      Missing price
+                    </span>
                   </td>
                   <td class="px-4 py-3 text-xs text-slate-600">
                     <div class="flex flex-wrap gap-1">
@@ -733,8 +743,31 @@
           </div>
         </div>
 
-        <div class="p-6 border-t border-slate-100 bg-slate-50 flex justify-end">
-          <button @click="showPrepModal = false" class="px-5 py-2 bg-slate-900 text-white font-bold rounded-lg shadow hover:bg-slate-800 transition-colors">
+        <div class="p-6 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 w-full sm:w-auto">
+            <div class="flex items-baseline gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+                {{ prepPlanData.is_partial ? 'Partial Total:' : 'Est. Grand Total:' }}
+              </span>
+              <span class="text-2xl font-black text-slate-900 font-mono">
+                ₱{{ Number(prepPlanData.grand_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs font-medium text-slate-500">
+                ({{ prepPlanData.coverage_label || '0 of 0 ingredients costed' }})
+              </span>
+              <span v-if="prepPlanData.is_partial" class="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full">
+                <AlertTriangle class="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                Partial Total (Missing Prices)
+              </span>
+              <span v-else-if="prepPlanData.prep_list && prepPlanData.prep_list.length > 0" class="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-full">
+                <Check class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                Fully Costed
+              </span>
+            </div>
+          </div>
+          <button @click="showPrepModal = false" class="w-full sm:w-auto px-5 py-2.5 bg-slate-900 text-white font-bold rounded-lg shadow hover:bg-slate-800 transition-colors">
             Close Prep Plan
           </button>
         </div>
@@ -787,7 +820,7 @@ const showRecipeModal = ref(false)
 const recipeDish = ref(null)
 const isSuggestingRecipe = ref(false)
 const isSavingRecipe = ref(false)
-const prepPlanData = ref({ total_dishes: 0, total_servings: 0, total_planned_servings: 0, total_cook_servings: 0, dishes: [], prep_list: [] })
+const prepPlanData = ref({ total_dishes: 0, total_servings: 0, total_planned_servings: 0, total_cook_servings: 0, dishes: [], prep_list: [], grand_total: 0, is_partial: false, coverage_label: '0 of 0 ingredients costed', costed_count: 0 })
 let debounceTimer = null
 
 const dishesExceedingPlan = computed(() => {
@@ -1057,7 +1090,7 @@ const onServingsSliderInput = () => {
 const fetchPrepPlan = async () => {
   const selectedItems = activeRoster.value.filter(r => r.selected)
   if (selectedItems.length === 0) {
-    prepPlanData.value = { total_dishes: 0, total_servings: 0, total_planned_servings: 0, total_cook_servings: 0, dishes: [], prep_list: [] }
+    prepPlanData.value = { total_dishes: 0, total_servings: 0, total_planned_servings: 0, total_cook_servings: 0, dishes: [], prep_list: [], grand_total: 0, is_partial: false, coverage_label: '0 of 0 ingredients costed', costed_count: 0 }
     return
   }
   try {

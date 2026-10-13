@@ -2424,6 +2424,20 @@ function handleGetPrepPlan($pdo) {
     $store_id = requireVendor($pdo);
     $reservationsMap = getStoreTodayReservationsMap($pdo, $store_id);
 
+    // Query store ingredient costs
+    $stmtCosts = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ?");
+    $stmtCosts->execute([$store_id]);
+    $allCosts = $stmtCosts->fetchAll(PDO::FETCH_ASSOC);
+
+    $costMapById = [];
+    $costMapByName = [];
+    foreach ($allCosts as $c) {
+        if (!empty($c['ingredient_id'])) {
+            $costMapById[(int)$c['ingredient_id']] = $c;
+        }
+        $costMapByName[strtolower(trim($c['ingredient_name']))] = $c;
+    }
+
     $requestedItems = [];
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $body = json_decode(file_get_contents('php://input'), true);
@@ -2559,8 +2573,17 @@ function handleGetPrepPlan($pdo) {
                     'base_unit' => $baseUnit,
                     'total_base_qty' => 0.0,
                     'is_unmapped' => false,
+                    'ingredient_id' => !empty($ing['ingredient_id']) ? (int)$ing['ingredient_id'] : null,
+                    'canonical_name' => !empty($ing['canonical_name']) ? trim($ing['canonical_name']) : null,
                     'dishes' => []
                 ];
+            } else {
+                if (empty($combinedMap[$key]['ingredient_id']) && !empty($ing['ingredient_id'])) {
+                    $combinedMap[$key]['ingredient_id'] = (int)$ing['ingredient_id'];
+                }
+                if (empty($combinedMap[$key]['canonical_name']) && !empty($ing['canonical_name'])) {
+                    $combinedMap[$key]['canonical_name'] = trim($ing['canonical_name']);
+                }
             }
 
             $combinedMap[$key]['total_base_qty'] += $baseQty;
@@ -2578,6 +2601,10 @@ function handleGetPrepPlan($pdo) {
     }
 
     $prepList = [];
+    $grandTotal = 0.0;
+    $costedCount = 0;
+    $hasUnpricedIngredient = false;
+
     foreach ($combinedMap as $key => $item) {
         $finalQty = $item['total_base_qty'];
         $finalUnit = $item['base_unit'];
@@ -2607,6 +2634,37 @@ function handleGetPrepPlan($pdo) {
 
         $dishNames = array_values(array_unique(array_column($item['dishes'], 'dish_name')));
 
+        // Cost calculation using vendor_ingredient_costs
+        $matchedCost = null;
+        if (!empty($item['ingredient_id']) && isset($costMapById[$item['ingredient_id']])) {
+            $matchedCost = $costMapById[$item['ingredient_id']];
+        } elseif (isset($costMapByName[strtolower(trim($item['name']))])) {
+            $matchedCost = $costMapByName[strtolower(trim($item['name']))];
+        } elseif (!empty($item['canonical_name']) && isset($costMapByName[strtolower(trim($item['canonical_name']))])) {
+            $matchedCost = $costMapByName[strtolower(trim($item['canonical_name']))];
+        }
+
+        $estimatedCost = null;
+        $hasPrice = false;
+        $unitPrice = null;
+        $costUnit = null;
+
+        if ($matchedCost && (float)$matchedCost['cost'] > 0) {
+            $costCalc = calculateIngredientItemCost($finalQty, $finalUnit, (float)$matchedCost['cost'], $matchedCost['cost_unit']);
+            if ($costCalc['cost'] !== null) {
+                $estimatedCost = round((float)$costCalc['cost'], 2);
+                $hasPrice = true;
+                $unitPrice = (float)$matchedCost['cost'];
+                $costUnit = $matchedCost['cost_unit'];
+                $grandTotal += $estimatedCost;
+                $costedCount++;
+            }
+        }
+
+        if (!$hasPrice) {
+            $hasUnpricedIngredient = true;
+        }
+
         $prepList[] = [
             'name' => $item['name'],
             'total_quantity' => $finalQty,
@@ -2615,6 +2673,10 @@ function handleGetPrepPlan($pdo) {
             'is_unmapped' => (bool)$item['is_unmapped'],
             'used_in_dishes' => $dishNames,
             'dish_count' => count($dishNames),
+            'estimated_cost' => $estimatedCost,
+            'has_price' => $hasPrice,
+            'unit_price' => $unitPrice,
+            'cost_unit' => $costUnit,
             'breakdown' => $item['dishes']
         ];
     }
@@ -2626,6 +2688,10 @@ function handleGetPrepPlan($pdo) {
         return strcasecmp($a['name'], $b['name']);
     });
 
+    $totalIngredients = count($prepList);
+    $isPartial = ($totalIngredients > 0 && ($costedCount < $totalIngredients || $hasUnpricedIngredient));
+    $coverageLabel = "{$costedCount} of {$totalIngredients} ingredients costed";
+
     jsonResponse([
         'total_dishes' => count($dishesBreakdown),
         'total_servings' => $totalCookServings,
@@ -2633,7 +2699,12 @@ function handleGetPrepPlan($pdo) {
         'total_cook_servings' => $totalCookServings,
         'dishes' => $dishesBreakdown,
         'needs_recipe' => $needsRecipe,
-        'prep_list' => $prepList
+        'prep_list' => $prepList,
+        'grand_total' => round($grandTotal, 2),
+        'is_partial' => (bool)$isPartial,
+        'costed_count' => $costedCount,
+        'total_ingredients' => $totalIngredients,
+        'coverage_label' => $coverageLabel
     ]);
 }
 
