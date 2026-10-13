@@ -72,6 +72,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/auth/login' && $method === 'POST') {
     require 'routes/auth.php';
     handleLogin($pdo);
+} elseif (($route === '/webhooks/paymongo' || $route === '/api/webhooks/paymongo') && $method === 'POST') {
+    require 'routes/webhooks.php';
+    handlePaymongoWebhook($pdo);
 } elseif ($route === '/menu' && $method === 'GET') {
     require 'routes/customer.php';
     handleGetMenu($pdo);
