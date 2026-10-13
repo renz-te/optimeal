@@ -8,6 +8,7 @@ header('Content-Type: application/json');
 require_once 'config.php';
 require_once 'db.php';
 require_once 'PricingEngine.php';
+require_once 'helpers.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -238,6 +239,15 @@ if ($route === '/auth/register' && $method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     require 'routes/notifications.php';
     handleMarkAsRead($session['user_id'], $input);
+} elseif (($route === '/user/preferences' || $route === '/api/user/preferences') && $method === 'GET') {
+    $session = requireRole($pdo, ['student', 'customer', 'vendor', 'admin']);
+    require 'routes/user.php';
+    handleGetPreferences($pdo, $session['user_id']);
+} elseif (($route === '/user/preferences' || $route === '/api/user/preferences') && ($method === 'PATCH' || $method === 'POST')) {
+    $session = requireRole($pdo, ['student', 'customer', 'vendor', 'admin']);
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    require 'routes/user.php';
+    handlePatchPreferences($pdo, $session['user_id'], $input);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }
