@@ -263,6 +263,122 @@ try {
     }
     echo "✓ Test 8 passed: Single history_id rollback succeeded and blocked double-rollback with HTTP 422.\n\n";
 
+    // 11. Test Percentage Boundary Validation (-50% to +100%)
+    echo "--- TEST 9: Percentage Boundary Validation (-50% to +100%) ---
+";
+    $tooLow = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/bulk-preview", 'POST', [
+        'percentage' => -50.1
+    ], $cookieVendor);
+    if ($tooLow['status'] !== 422) {
+        throw new Exception("Percentage below -50% was not rejected with HTTP 422, got {$tooLow['status']}");
+    }
+
+    $tooHigh = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/bulk-preview", 'POST', [
+        'percentage' => 100.1
+    ], $cookieVendor);
+    if ($tooHigh['status'] !== 422) {
+        throw new Exception("Percentage above +100% was not rejected with HTTP 422, got {$tooHigh['status']}");
+    }
+    echo "✓ Test 9 passed: Percentage boundaries strictly enforced between -50% and +100% with HTTP 422.
+
+";
+
+    // 12. Test Scope Selection ('all' vs 'selected')
+    echo "--- TEST 10: Scope Selection ('selected' vs 'all') ---
+";
+    // Fetch test item id
+    $stmtItem = $pdo->prepare("SELECT id FROM vendor_ingredient_costs WHERE store_id = 1 AND ingredient_name = 'D9Test Seasoning'");
+    $stmtItem->execute();
+    $targetItem = $stmtItem->fetch();
+    if (!$targetItem) {
+        // Re-insert for test if missing
+        $pdo->prepare("INSERT INTO vendor_ingredient_costs (store_id, ingredient_name, cost, cost_unit) VALUES (1, 'D9Test Seasoning', 100.00, 'kg')")->execute();
+        $targetItemId = (int)$pdo->lastInsertId();
+    } else {
+        $targetItemId = (int)$targetItem['id'];
+        $pdo->prepare("UPDATE vendor_ingredient_costs SET cost = 100.00 WHERE id = ?")->execute([$targetItemId]);
+    }
+
+    $scopePreview = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/bulk-preview", 'POST', [
+        'percentage' => 10,
+        'scope' => 'selected',
+        'ingredient_ids' => [$targetItemId]
+    ], $cookieVendor);
+
+    if ($scopePreview['status'] !== 200 || count($scopePreview['data']['preview']) !== 1) {
+        throw new Exception("Scope 'selected' preview failed: " . json_encode($scopePreview));
+    }
+    if ($scopePreview['data']['preview'][0]['ingredient_name'] !== 'D9Test Seasoning') {
+        throw new Exception("Scope 'selected' preview returned wrong item: " . json_encode($scopePreview['data']['preview']));
+    }
+    echo "✓ Test 10 passed: Scope 'selected' accurately restricts preview to selected items only.
+
+";
+
+    // 13. Test Multi-Batch & Non-Contiguous Rollback Defense
+    echo "--- TEST 11: Multi-Batch & Non-Contiguous Rollback Defense ---
+";
+    // Apply Batch A
+    $applyBatchA = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/bulk-apply", 'POST', [
+        'percentage' => 10,
+        'scope' => 'selected',
+        'ingredient_ids' => [$targetItemId]
+    ], $cookieVendor);
+    if ($applyBatchA['status'] !== 200) {
+        throw new Exception("Apply Batch A failed: " . json_encode($applyBatchA));
+    }
+    $batchAId = $applyBatchA['data']['batch_id'];
+
+    // Apply Batch B
+    $applyBatchB = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/bulk-apply", 'POST', [
+        'percentage' => 10,
+        'scope' => 'selected',
+        'ingredient_ids' => [$targetItemId]
+    ], $cookieVendor);
+    if ($applyBatchB['status'] !== 200) {
+        throw new Exception("Apply Batch B failed: " . json_encode($applyBatchB));
+    }
+    $batchBId = $applyBatchB['data']['batch_id'];
+
+    // Attempt non-contiguous rollback: rolling back Batch A while Batch B is active
+    $nonContiguousRes = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/rollback", 'POST', [
+        'batch_id' => $batchAId
+    ], $cookieVendor);
+
+    if ($nonContiguousRes['status'] !== 422) {
+        throw new Exception("Non-contiguous rollback was not rejected with HTTP 422: got {$nonContiguousRes['status']}, raw: {$nonContiguousRes['raw']}");
+    }
+    echo "✓ Test 11a passed: Non-contiguous rollback attempt on older batch rejected with HTTP 422.
+";
+
+    // Rollback Batch B first (contiguous)
+    $rollbackB = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/rollback", 'POST', [
+        'batch_id' => $batchBId
+    ], $cookieVendor);
+    if ($rollbackB['status'] !== 200) {
+        throw new Exception("Contiguous rollback of Batch B failed: " . json_encode($rollbackB));
+    }
+    echo "✓ Test 11b passed: Contiguous rollback of newer Batch B succeeded.
+";
+
+    // Now Rollback Batch A (should now succeed)
+    $rollbackA = d9CatJsonRequest("$baseUrl/vendor/ingredient-costs/rollback", 'POST', [
+        'batch_id' => $batchAId
+    ], $cookieVendor);
+    if ($rollbackA['status'] !== 200) {
+        throw new Exception("Rollback of Batch A failed after Batch B was rolled back: " . json_encode($rollbackA));
+    }
+
+    $stmtFinal = $pdo->prepare("SELECT cost FROM vendor_ingredient_costs WHERE id = ?");
+    $stmtFinal->execute([$targetItemId]);
+    $restoredCost = (float)$stmtFinal->fetchColumn();
+    if (abs($restoredCost - 100.00) > 0.01) {
+        throw new Exception("Cost after full sequential rollback should be 100.00, got {$restoredCost}");
+    }
+    echo "✓ Test 11c passed: Sequential rollback of Batch A succeeded and restored cost to ₱100.00.
+
+";
+
     echo "ALL PHASE D9.3 VERIFICATIONS PASSED CLEANLY!\n";
 
 } catch (Exception $e) {

@@ -1574,18 +1574,65 @@ function handleBulkPreviewIngredientCosts($pdo) {
     $input = json_decode(file_get_contents('php://input'), true);
 
     if (!isset($input['percent']) && !isset($input['percentage'])) {
-        jsonResponse(['error' => 'Percentage adjustment is required'], 422);
+        jsonResponse(['error' => 'Percentage adjustment is required.'], 422);
     }
     $percent = (float)($input['percent'] ?? $input['percentage']);
 
-    $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? ORDER BY ingredient_name ASC");
-    $stmt->execute([$store_id]);
+    if ($percent < -50 || $percent > 100) {
+        jsonResponse(['error' => 'Percentage adjustment must be strictly between -50% and +100%.'], 422);
+    }
+
+    $scope = $input['scope'] ?? 'all';
+    if ($scope === 'selected') {
+        $rawIds = $input['ingredient_ids'] ?? ($input['selected_ids'] ?? []);
+        if (!is_array($rawIds) || empty($rawIds)) {
+            jsonResponse(['error' => 'No ingredients selected for adjustment.'], 422);
+        }
+        $selectedIds = array_values(array_filter(array_map('intval', $rawIds), fn($id) => $id > 0));
+        if (empty($selectedIds)) {
+            jsonResponse(['error' => 'No valid ingredient IDs provided.'], 422);
+        }
+        $inPlaceholders = implode(',', array_fill(0, count($selectedIds), '?'));
+        $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? AND id IN ($inPlaceholders) ORDER BY ingredient_name ASC");
+        $stmt->execute(array_merge([$store_id], $selectedIds));
+    } else {
+        $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? ORDER BY ingredient_name ASC");
+        $stmt->execute([$store_id]);
+    }
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $preview = [];
+    if (empty($items)) {
+        jsonResponse(['error' => 'No ingredients found in catalog matching the selected criteria.'], 422);
+    }
+
+    $offendingIngredients = [];
+    $calculations = [];
     foreach ($items as $it) {
         $oldCost = (float)$it['cost'];
-        $newCost = max(0, round($oldCost * (1 + $percent / 100), 2));
+        $newCost = round($oldCost * (1 + $percent / 100), 2);
+        if ($newCost <= 0) {
+            $offendingIngredients[] = $it['ingredient_name'] . " (calculated ₱" . number_format($newCost, 2) . " from ₱" . number_format($oldCost, 2) . ")";
+        }
+        $calculations[] = [
+            'item' => $it,
+            'oldCost' => $oldCost,
+            'newCost' => $newCost
+        ];
+    }
+
+    if (!empty($offendingIngredients)) {
+        $names = implode(', ', $offendingIngredients);
+        jsonResponse([
+            'error' => "Adjustment rejected: newly calculated cost would drop to zero or negative for: $names.",
+            'offending_ingredients' => $offendingIngredients
+        ], 422);
+    }
+
+    $preview = [];
+    foreach ($calculations as $calc) {
+        $it = $calc['item'];
+        $oldCost = $calc['oldCost'];
+        $newCost = $calc['newCost'];
         $preview[] = [
             'id' => (int)$it['id'],
             'ingredient_name' => $it['ingredient_name'],
@@ -1599,6 +1646,7 @@ function handleBulkPreviewIngredientCosts($pdo) {
 
     jsonResponse([
         'percent' => $percent,
+        'scope' => $scope,
         'count' => count($preview),
         'items' => $preview,
         'preview' => $preview
@@ -1610,16 +1658,58 @@ function handleBulkApplyIngredientCosts($pdo) {
     $input = json_decode(file_get_contents('php://input'), true);
 
     if (!isset($input['percent']) && !isset($input['percentage'])) {
-        jsonResponse(['error' => 'Percentage adjustment is required'], 422);
+        jsonResponse(['error' => 'Percentage adjustment is required.'], 422);
     }
     $percent = (float)($input['percent'] ?? $input['percentage']);
 
-    $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ?");
-    $stmt->execute([$store_id]);
+    if ($percent < -50 || $percent > 100) {
+        jsonResponse(['error' => 'Percentage adjustment must be strictly between -50% and +100%.'], 422);
+    }
+
+    $scope = $input['scope'] ?? 'all';
+    if ($scope === 'selected') {
+        $rawIds = $input['ingredient_ids'] ?? ($input['selected_ids'] ?? []);
+        if (!is_array($rawIds) || empty($rawIds)) {
+            jsonResponse(['error' => 'No ingredients selected for adjustment.'], 422);
+        }
+        $selectedIds = array_values(array_filter(array_map('intval', $rawIds), fn($id) => $id > 0));
+        if (empty($selectedIds)) {
+            jsonResponse(['error' => 'No valid ingredient IDs provided.'], 422);
+        }
+        $inPlaceholders = implode(',', array_fill(0, count($selectedIds), '?'));
+        $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? AND id IN ($inPlaceholders) ORDER BY ingredient_name ASC");
+        $stmt->execute(array_merge([$store_id], $selectedIds));
+    } else {
+        $stmt = $pdo->prepare("SELECT * FROM vendor_ingredient_costs WHERE store_id = ? ORDER BY ingredient_name ASC");
+        $stmt->execute([$store_id]);
+    }
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (empty($items)) {
-        jsonResponse(['error' => 'No ingredients found in catalog to adjust.'], 400);
+        jsonResponse(['error' => 'No ingredients found in catalog matching the selected criteria.'], 422);
+    }
+
+    $offendingIngredients = [];
+    $calculations = [];
+    foreach ($items as $it) {
+        $oldCost = (float)$it['cost'];
+        $newCost = round($oldCost * (1 + $percent / 100), 2);
+        if ($newCost <= 0) {
+            $offendingIngredients[] = $it['ingredient_name'] . " (calculated ₱" . number_format($newCost, 2) . " from ₱" . number_format($oldCost, 2) . ")";
+        }
+        $calculations[] = [
+            'item' => $it,
+            'oldCost' => $oldCost,
+            'newCost' => $newCost
+        ];
+    }
+
+    if (!empty($offendingIngredients)) {
+        $names = implode(', ', $offendingIngredients);
+        jsonResponse([
+            'error' => "Adjustment rejected: newly calculated cost would drop to zero or negative for: $names.",
+            'offending_ingredients' => $offendingIngredients
+        ], 422);
     }
 
     $batchId = 'batch_' . bin2hex(random_bytes(8));
@@ -1633,9 +1723,10 @@ function handleBulkApplyIngredientCosts($pdo) {
     try {
         $updated = [];
         $changedNames = [];
-        foreach ($items as $it) {
-            $oldCost = (float)$it['cost'];
-            $newCost = max(0, round($oldCost * (1 + $percent / 100), 2));
+        foreach ($calculations as $calc) {
+            $it = $calc['item'];
+            $oldCost = $calc['oldCost'];
+            $newCost = $calc['newCost'];
             $updateStmt->execute([$newCost, (int)$it['id']]);
             $historyStmt->execute([$store_id, $it['ingredient_name'], $oldCost, $newCost, $it['cost_unit'], $batchId]);
 
@@ -1654,7 +1745,9 @@ function handleBulkApplyIngredientCosts($pdo) {
         jsonResponse([
             'message' => "Bulk price adjustment of {$percent}% applied successfully",
             'batch_id' => $batchId,
+            'scope' => $scope,
             'count' => count($updated),
+            'affected_count' => count($updated),
             'updated' => $updated,
             'affected_dishes' => $affectedDishes
         ]);
@@ -1713,6 +1806,39 @@ function handleRollbackIngredientCosts($pdo) {
             if ((int)$r['is_rolled_back'] === 1) {
                 $pdo->rollBack();
                 jsonResponse(['error' => 'This change has already been rolled back.'], 422);
+            }
+        }
+
+        // Critical edge-case defense:
+        // Ensure rolling back an older adjustment/batch does NOT corrupt subsequent valid adjustments.
+        // If an ingredient has a subsequent active adjustment, fail gracefully with an informative error.
+        $recordIds = array_map(fn($rec) => (int)$rec['id'], $records);
+        $inIds = implode(',', array_fill(0, count($recordIds), '?'));
+
+        foreach ($records as $r) {
+            $query = "
+                SELECT id, batch_id, created_at, action, new_cost
+                FROM ingredient_price_history
+                WHERE store_id = ?
+                  AND LOWER(ingredient_name) = LOWER(?)
+                  AND id > ?
+                  AND is_rolled_back = 0
+                  AND action != 'rollback'
+                  AND id NOT IN ($inIds)
+                ORDER BY id DESC
+                LIMIT 1
+            ";
+            $params = array_merge([$store_id, $r['ingredient_name'], (int)$r['id']], $recordIds);
+            $newerStmt = $pdo->prepare($query);
+            $newerStmt->execute($params);
+            $newer = $newerStmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($newer) {
+                $pdo->rollBack();
+                $actionLabel = !empty($newer['batch_id']) ? "batch '{$newer['batch_id']}'" : "adjustment #{$newer['id']}";
+                jsonResponse([
+                    'error' => "Cannot roll back change: ingredient '{$r['ingredient_name']}' has a subsequent active price adjustment ({$actionLabel}). Non-contiguous rollbacks are not allowed; please roll back newer adjustments first."
+                ], 422);
             }
         }
 

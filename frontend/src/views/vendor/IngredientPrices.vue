@@ -164,34 +164,116 @@
 
     <!-- TAB 2: BULK ADJUSTMENT -->
     <div v-if="activeTab === 'bulk'" class="space-y-6">
-      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
         <div>
           <h2 class="text-base font-black text-slate-900 flex items-center gap-2">
             <TrendingUp :size="18" class="text-emerald-600" />
-            <span>Apply Percentage Adjustment Across All Catalog Ingredients</span>
+            <span>Apply Bulk Percentage Adjustment</span>
           </h2>
           <p class="text-xs text-slate-500 mt-1">
-            Simulate or execute an across-the-board raw ingredient cost change (e.g. inflation, market-wide shift).
-            Adjustments are logged with unique batch IDs and can be rolled back anytime.
+            Simulate or apply a raw ingredient cost adjustment across all ingredients or specific selected items.
+            Percentage must be between -50% and +100%. Adjustments are logged with batch IDs and can be rolled back safely.
           </p>
         </div>
 
-        <div class="flex flex-col sm:flex-row sm:items-center gap-4 pt-2">
-          <div class="flex items-center gap-2">
-            <label class="text-xs font-black uppercase tracking-wider text-slate-600">Adjustment %:</label>
-            <input
-              type="number"
-              step="0.5"
-              v-model.number="bulkPercentage"
-              placeholder="+10 or -5"
-              class="w-32 px-3 py-2 border border-slate-300 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 bg-white"
-            />
+        <!-- Scope Selection -->
+        <div class="space-y-3 pt-1">
+          <label class="text-xs font-black uppercase tracking-wider text-slate-600 block">Adjustment Scope</label>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="flex items-center gap-2 cursor-pointer bg-slate-50 hover:bg-slate-100 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 transition-colors">
+              <input type="radio" value="all" v-model="bulkScope" class="text-emerald-600 focus:ring-emerald-500" />
+              <span>All Catalog Ingredients ({{ catalog.length }})</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer bg-slate-50 hover:bg-slate-100 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 transition-colors">
+              <input type="radio" value="selected" v-model="bulkScope" class="text-emerald-600 focus:ring-emerald-500" />
+              <span>Specific Selected Ingredients ({{ selectedIngredientIds.length }} chosen)</span>
+            </label>
+          </div>
+
+          <!-- Selection Box if scope is selected -->
+          <div v-if="bulkScope === 'selected'" class="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  @click="selectAllForBulk"
+                  class="text-xs text-emerald-700 font-bold hover:underline"
+                >
+                  Select All ({{ catalog.length }})
+                </button>
+                <span class="text-slate-300">|</span>
+                <button
+                  type="button"
+                  @click="deselectAllForBulk"
+                  class="text-xs text-rose-600 font-bold hover:underline"
+                >
+                  Deselect All
+                </button>
+              </div>
+
+              <div class="relative w-full sm:w-64">
+                <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  v-model="bulkIngredientSearch"
+                  placeholder="Filter ingredients..."
+                  class="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs bg-white focus:border-emerald-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div class="max-h-56 overflow-y-auto divide-y divide-slate-200/60 bg-white rounded-lg border border-slate-200">
+              <div v-if="filteredBulkIngredients.length === 0" class="py-6 text-center text-xs text-slate-400">
+                No matching ingredients in catalog.
+              </div>
+              <div
+                v-for="ing in filteredBulkIngredients"
+                :key="ing.id"
+                class="flex items-center justify-between px-3.5 py-2 hover:bg-slate-50 cursor-pointer"
+                @click="toggleIngredientSelection(ing.id)"
+              >
+                <label class="flex items-center gap-2.5 cursor-pointer text-xs font-medium text-slate-800" @click.stop>
+                  <input
+                    type="checkbox"
+                    :value="ing.id"
+                    v-model="selectedIngredientIds"
+                    class="rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span class="font-bold text-slate-900">{{ ing.ingredient_name }}</span>
+                </label>
+                <div class="text-xs font-mono text-slate-500">
+                  ₱{{ Number(ing.cost || 0).toFixed(2) }} / {{ ing.cost_unit || 'kg' }}
+                </div>
+              </div>
+            </div>
+            <div class="text-[11px] font-bold text-slate-500 flex justify-end">
+              {{ selectedIngredientIds.length }} of {{ catalog.length }} selected
+            </div>
+          </div>
+        </div>
+
+        <!-- Percentage Input and Action Buttons -->
+        <div class="flex flex-col sm:flex-row sm:items-center gap-4 pt-2 border-t border-slate-100">
+          <div class="flex flex-col gap-1">
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-black uppercase tracking-wider text-slate-600">Adjustment %:</label>
+              <input
+                type="number"
+                step="0.5"
+                min="-50"
+                max="100"
+                v-model.number="bulkPercentage"
+                placeholder="-50 to +100"
+                class="w-36 px-3 py-2 border border-slate-300 rounded-xl font-bold text-sm outline-none focus:border-emerald-500 bg-white"
+              />
+            </div>
+            <span class="text-[10px] text-slate-400 font-medium">Valid range: -50% to +100%</span>
           </div>
 
           <div class="flex items-center gap-3">
             <button
               @click="previewBulkAdjustment"
-              :disabled="isPreviewing || !bulkPercentage"
+              :disabled="isPreviewing || bulkPercentage === null || bulkPercentage === ''"
               class="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-all border border-slate-300 disabled:opacity-50"
             >
               <Eye :size="14" />
@@ -200,7 +282,7 @@
 
             <button
               @click="applyBulkAdjustment"
-              :disabled="isApplying || !bulkPercentage || previewItems.length === 0"
+              :disabled="isApplying || bulkPercentage === null || bulkPercentage === '' || previewItems.length === 0"
               class="flex items-center gap-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all disabled:opacity-50"
             >
               <Check :size="14" />
@@ -209,10 +291,11 @@
           </div>
         </div>
 
+        <!-- Preview Results Table -->
         <div v-if="previewItems.length > 0" class="pt-4 border-t border-slate-100 space-y-3">
           <div class="flex items-center justify-between">
             <span class="text-xs font-black text-slate-700 uppercase tracking-wider">
-              Preview Diff ({{ previewItems.length }} Ingredients Affected)
+              Preview Diff ({{ previewItems.length }} Ingredients Affected — Scope: {{ bulkScope }})
             </span>
             <span class="text-xs font-semibold text-slate-500">
               Adjustment rate: {{ bulkPercentage > 0 ? '+' : '' }}{{ bulkPercentage }}%
@@ -233,11 +316,11 @@
               <tbody class="divide-y divide-slate-100 font-medium">
                 <tr v-for="p in previewItems" :key="p.ingredient_name" class="hover:bg-slate-50/50">
                   <td class="py-2 px-4 font-bold text-slate-900">{{ p.ingredient_name }}</td>
-                  <td class="py-2 px-4 text-slate-500">₱{{ Number(p.current_cost).toFixed(2) }}</td>
+                  <td class="py-2 px-4 text-slate-500">₱{{ Number(p.current_cost || p.old_cost).toFixed(2) }}</td>
                   <td class="py-2 px-4 font-black text-emerald-700">₱{{ Number(p.new_cost).toFixed(2) }}</td>
                   <td class="py-2 px-4 text-slate-500">per {{ p.cost_unit }}</td>
-                  <td class="py-2 px-4 text-right font-bold" :class="p.new_cost >= p.current_cost ? 'text-amber-600' : 'text-emerald-600'">
-                    {{ p.new_cost >= p.current_cost ? '+' : '' }}₱{{ (p.new_cost - p.current_cost).toFixed(2) }}
+                  <td class="py-2 px-4 text-right font-bold" :class="p.new_cost >= (p.current_cost || p.old_cost) ? 'text-amber-600' : 'text-emerald-600'">
+                    {{ p.new_cost >= (p.current_cost || p.old_cost) ? '+' : '' }}₱{{ (p.new_cost - (p.current_cost || p.old_cost)).toFixed(2) }}
                   </td>
                 </tr>
               </tbody>
@@ -542,6 +625,34 @@ const editForm = ref({
 
 // Bulk Adjust
 const bulkPercentage = ref(null)
+const bulkScope = ref('all')
+const selectedIngredientIds = ref([])
+const bulkIngredientSearch = ref('')
+
+const filteredBulkIngredients = computed(() => {
+  const q = bulkIngredientSearch.value.trim().toLowerCase()
+  if (!q) return catalog.value
+  return catalog.value.filter(item =>
+    (item.ingredient_name || '').toLowerCase().includes(q)
+  )
+})
+
+const selectAllForBulk = () => {
+  selectedIngredientIds.value = catalog.value.map(i => i.id)
+}
+
+const deselectAllForBulk = () => {
+  selectedIngredientIds.value = []
+}
+
+const toggleIngredientSelection = (id) => {
+  const idx = selectedIngredientIds.value.indexOf(id)
+  if (idx > -1) {
+    selectedIngredientIds.value.splice(idx, 1)
+  } else {
+    selectedIngredientIds.value.push(id)
+  }
+}
 const isPreviewing = ref(false)
 const isApplying = ref(false)
 const previewItems = ref([])
@@ -649,23 +760,40 @@ const saveSinglePrice = async () => {
 }
 
 const previewBulkAdjustment = async () => {
-  if (!bulkPercentage.value) return
+  if (bulkPercentage.value === null || bulkPercentage.value === undefined || bulkPercentage.value === '') return
+
+  if (bulkPercentage.value < -50 || bulkPercentage.value > 100) {
+    errorMessage.value = 'Adjustment percentage must be strictly between -50% and +100%.'
+    return
+  }
+
+  if (bulkScope.value === 'selected' && selectedIngredientIds.value.length === 0) {
+    errorMessage.value = 'Please select at least one ingredient to adjust.'
+    return
+  }
+
   isPreviewing.value = true
   errorMessage.value = ''
   try {
+    const payload = {
+      percentage: bulkPercentage.value,
+      scope: bulkScope.value,
+      ingredient_ids: bulkScope.value === 'selected' ? selectedIngredientIds.value : []
+    }
     const res = await fetch('/api/vendor/ingredient-costs/bulk-preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ percentage: bulkPercentage.value })
+      body: JSON.stringify(payload)
     })
 
     const data = await res.json()
     if (!res.ok) {
       errorMessage.value = data.error || 'Failed to preview bulk adjustment.'
+      previewItems.value = []
       return
     }
 
-    previewItems.value = data.preview || []
+    previewItems.value = data.preview || data.items || []
   } catch (err) {
     errorMessage.value = `Network error: ${err.message}`
   } finally {
@@ -674,18 +802,38 @@ const previewBulkAdjustment = async () => {
 }
 
 const applyBulkAdjustment = async () => {
-  if (!bulkPercentage.value) return
-  if (!confirm(`Are you sure you want to apply a ${bulkPercentage.value}% price adjustment across all catalog ingredients?`)) {
+  if (bulkPercentage.value === null || bulkPercentage.value === undefined || bulkPercentage.value === '') return
+
+  if (bulkPercentage.value < -50 || bulkPercentage.value > 100) {
+    errorMessage.value = 'Adjustment percentage must be strictly between -50% and +100%.'
+    return
+  }
+
+  if (bulkScope.value === 'selected' && selectedIngredientIds.value.length === 0) {
+    errorMessage.value = 'Please select at least one ingredient to adjust.'
+    return
+  }
+
+  const targetText = bulkScope.value === 'selected'
+    ? `${selectedIngredientIds.value.length} selected ingredients`
+    : `all ${catalog.value.length} catalog ingredients`
+
+  if (!confirm(`Are you sure you want to apply a ${bulkPercentage.value}% price adjustment across ${targetText}?`)) {
     return
   }
 
   isApplying.value = true
   errorMessage.value = ''
   try {
+    const payload = {
+      percentage: bulkPercentage.value,
+      scope: bulkScope.value,
+      ingredient_ids: bulkScope.value === 'selected' ? selectedIngredientIds.value : []
+    }
     const res = await fetch('/api/vendor/ingredient-costs/bulk-apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ percentage: bulkPercentage.value })
+      body: JSON.stringify(payload)
     })
 
     const data = await res.json()
@@ -694,7 +842,7 @@ const applyBulkAdjustment = async () => {
       return
     }
 
-    successMessage.value = `Applied ${bulkPercentage.value}% adjustment to ${data.affected_count || 0} ingredients! Batch ID: ${data.batch_id}`
+    successMessage.value = `Applied ${bulkPercentage.value}% adjustment to ${data.affected_count || data.count || 0} ingredients! Batch ID: ${data.batch_id}`
     previewItems.value = []
     bulkPercentage.value = null
     await fetchData()
