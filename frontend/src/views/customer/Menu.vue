@@ -568,61 +568,72 @@
       </div>
     </transition>
 
-    <!-- Checkout Options Modal -->
-    <div v-if="showCheckoutOptions" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
-      <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+    <!-- Checkout / Claim Options Slide-Over Drawer -->
+    <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="showCheckoutOptions" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] transition-opacity" @click="showCheckoutOptions = false"></div>
+    </transition>
+
+    <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
+      <div v-if="showCheckoutOptions" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-white shadow-2xl z-[100] flex flex-col overflow-hidden text-slate-900">
         <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-          <h3 class="text-lg font-bold text-slate-900">How would you like to claim?</h3>
-          <button @click="showCheckoutOptions = false" class="text-slate-400 hover:text-slate-600 transition-colors">
+          <div>
+            <h3 class="text-xl font-black text-slate-900">How would you like to claim?</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Select your payment & pickup option</p>
+          </div>
+          <button @click="showCheckoutOptions = false" class="p-2 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors">
             <X :size="20" />
           </button>
         </div>
-        <div class="p-6 space-y-4">
+
+        <div class="p-6 space-y-4 flex-1 overflow-y-auto">
           <div v-if="checkoutError" class="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-lg text-sm font-medium flex items-start gap-2 shadow-sm">
             <AlertTriangle :size="16" class="shrink-0 mt-0.5" />
             <span>{{ checkoutError }}</span>
           </div>
 
-          <!-- Payment Method Selector inside claim modal -->
-          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-            <div class="flex items-center justify-between text-xs font-bold text-slate-700">
-              <span class="flex items-center gap-1.5">
-                <CreditCard :size="14" class="text-emerald-600" />
-                Select Payment Method:
-              </span>
+          <!-- Pre-Order & Pay (PayMongo) -->
+          <div @click="paymentMethod = 'paymongo'" 
+               class="w-full text-left p-4 border-2 rounded-2xl cursor-pointer transition-all group relative overflow-hidden"
+               :class="paymentMethod === 'paymongo' ? 'border-emerald-500 bg-emerald-50/80 shadow-md ring-2 ring-emerald-500/20' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-2.5">
+                <input type="radio" v-model="paymentMethod" value="paymongo" class="text-emerald-600 focus:ring-emerald-500 h-4 w-4">
+                <span class="font-bold text-emerald-950 text-base">Pre-Order & Pay</span>
+              </div>
+              <span class="text-[10px] bg-emerald-600 text-white font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Express Pickup</span>
             </div>
-            <div class="grid grid-cols-2 gap-2">
-              <label class="flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition-all"
-                     :class="paymentMethod === 'cash' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold shadow-sm' : 'border-slate-200 bg-white text-slate-700'">
-                <input type="radio" v-model="paymentMethod" value="cash" class="text-emerald-600 focus:ring-emerald-500">
-                <span class="text-xs">Cash on Pickup</span>
-              </label>
-              <label class="flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition-all"
-                     :class="paymentMethod === 'paymongo' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold shadow-sm' : 'border-slate-200 bg-white text-slate-700'">
-                <input type="radio" v-model="paymentMethod" value="paymongo" class="text-emerald-600 focus:ring-emerald-500">
-                <span class="text-xs">Online Payment</span>
-              </label>
-            </div>
+            <p class="text-xs text-emerald-800 ml-6">Pay now online via PayMongo (GCash, Maya, Card). Skip the line and pick up your plate immediately.</p>
           </div>
 
-          <button @click="processOrder('express')" class="w-full text-left p-4 border-2 border-emerald-500 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors group">
-            <div class="flex items-center justify-between mb-1">
-              <span class="font-bold text-emerald-900">Pre-Order & Pay</span>
-              <span class="text-[10px] bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Express Pickup</span>
+          <!-- Claim In-Line Pass (Cash) -->
+          <div @click="paymentMethod = 'cash'" 
+               class="w-full text-left p-4 border-2 rounded-2xl cursor-pointer transition-all group relative overflow-hidden"
+               :class="paymentMethod === 'cash' ? 'border-emerald-500 bg-emerald-50/80 shadow-md ring-2 ring-emerald-500/20' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-2.5">
+                <input type="radio" v-model="paymentMethod" value="cash" class="text-emerald-600 focus:ring-emerald-500 h-4 w-4">
+                <span class="font-bold text-slate-900 text-base">Claim In-Line Pass</span>
+              </div>
+              <span class="text-[10px] bg-slate-200 text-slate-700 font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">Cash on Pickup</span>
             </div>
-            <p class="text-sm text-emerald-700">Pay now online. Skip the line and pick up your plate immediately.</p>
-          </button>
+            <p class="text-xs text-slate-600 ml-6">Generate a temporary 4-digit code. Present and pay at the physical counter.</p>
+          </div>
+        </div>
 
-          <button @click="processOrder('inline')" class="w-full text-left p-4 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-colors group">
-            <div class="flex items-center justify-between mb-1">
-              <span class="font-bold text-slate-900 group-hover:text-slate-700">Claim In-Line Pass</span>
-              <span class="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">Cash at Counter</span>
-            </div>
-            <p class="text-sm text-slate-500">Generate a temporary 4-digit code. Present and pay at the physical counter.</p>
+        <div class="p-6 bg-slate-50 border-t border-slate-200 flex-shrink-0">
+          <div class="flex justify-between items-center mb-4">
+            <span class="text-sm font-semibold text-slate-600">Total to Pay</span>
+            <span class="text-2xl font-black text-emerald-600 tabular-nums">₱{{ cartTotal.toFixed(2) }}</span>
+          </div>
+          <button @click="processOrder(paymentMethod === 'paymongo' ? 'express' : 'inline')" 
+                  class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-base">
+            <CreditCard v-if="paymentMethod === 'paymongo'" :size="18" />
+            <Utensils v-else :size="18" />
+            <span>{{ paymentMethod === 'paymongo' ? 'Pay Online with PayMongo' : 'Confirm Order & Pay with Cash' }}</span>
           </button>
         </div>
       </div>
-    </div>
+    </transition>
 
     <!-- Confirmation Slide-Over Drawer -->
     <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
@@ -1399,6 +1410,7 @@ const processOrder = async (type) => {
     confirmedFulfillmentType.value = orderType.value
     showConfirmationDrawer.value = true
     cart.value = []
+    router.push('/customer/orders')
   } catch (e) {
     console.error('Checkout failed:', e)
     checkoutError.value = e.message
