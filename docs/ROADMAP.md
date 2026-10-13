@@ -1,4 +1,4 @@
---- ROADMAP ---
+﻿--- ROADMAP ---
 Order: Step 1 -> 2 -> 3 -> 4 -> 5 -> 6. Each step must leave the app demo-ready.
 Step 1 (D9b): bulk price and rollback fixes, admin closing-time wording, Prep Plan cost total, B3.2 closing-time gap check.
 Step 2 (D10, notifications): vendors send notifications (roster published, a discount tier starting, last clearance); customers are notified about their pre-cooked reservations. Polling about every 20 s, bell icon with unread count. In-app only; browser or mobile push is a documented next step.

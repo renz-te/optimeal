@@ -1,9 +1,11 @@
-node_modules/
+﻿node_modules/
 dist/
 dist-ssr/
 .env
 api/.env
 .env.*
+!.env.example
+!api/.env.example
 *.local
 .DS_Store
 tests/*.txt
