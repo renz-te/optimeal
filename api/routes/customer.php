@@ -707,6 +707,27 @@ function handleCreateReservation($pdo)
         $pdo->prepare("UPDATE orders SET total_amount = ? WHERE id = ?")->execute([$total_amount, $order_id]);
 
         $pdo->commit();
+
+        try {
+            $vendorStmt = $pdo->prepare("SELECT vendor_user_id FROM stores WHERE id = ?");
+            $vendorStmt->execute([$store_id]);
+            $vendorUserId = (int)$vendorStmt->fetchColumn();
+
+            if ($vendorUserId > 0) {
+                $notifStmt = $pdo->prepare("
+                    INSERT INTO notifications (user_id, type, message, reference_id, is_read, created_at)
+                    VALUES (?, 'new_order', ?, ?, 0, NOW())
+                ");
+                $notifStmt->execute([
+                    $vendorUserId,
+                    "New order #{$order_id} received.",
+                    $order_id
+                ]);
+            }
+        } catch (Exception $e) {
+            error_log("Failed to dispatch new_order notification: " . $e->getMessage());
+        }
+
         jsonResponse(['message' => 'Reservation created', 'order_id' => $order_id, 'total_amount' => $total_amount, 'claim_token' => $claimToken]);
     } catch (BusinessException $e) {
         if ($pdo->inTransaction()) {

@@ -168,7 +168,7 @@ function handleUpdateOrderStatus($pdo) {
     try {
         $pdo->beginTransaction();
 
-        $checkStmt = $pdo->prepare("SELECT id, status, allergen_override, allergen_conflicts FROM orders WHERE id = ? AND store_id = ? FOR UPDATE");
+        $checkStmt = $pdo->prepare("SELECT id, user_id, status, allergen_override, allergen_conflicts FROM orders WHERE id = ? AND store_id = ? FOR UPDATE");
         $checkStmt->execute([$order_id, $store_id]);
         $order = $checkStmt->fetch();
 
@@ -214,6 +214,24 @@ function handleUpdateOrderStatus($pdo) {
         }
 
         $pdo->commit();
+
+        try {
+            $customerUserId = (int)($order['user_id'] ?? 0);
+            if ($customerUserId > 0) {
+                $notifStmt = $pdo->prepare("
+                    INSERT INTO notifications (user_id, type, message, reference_id, is_read, created_at)
+                    VALUES (?, 'order_status', ?, ?, 0, NOW())
+                ");
+                $notifStmt->execute([
+                    $customerUserId,
+                    "Your order #{$order_id} is now {$status}.",
+                    $order_id
+                ]);
+            }
+        } catch (Exception $e) {
+            error_log("Failed to dispatch order_status notification: " . $e->getMessage());
+        }
+
         jsonResponse(['message' => 'Order status updated successfully']);
     } catch (BusinessException $e) {
         if ($pdo->inTransaction()) {
