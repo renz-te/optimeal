@@ -863,7 +863,7 @@ function handleUpdateFulfillment($pdo)
             }
 
             $settings = getCustomerSettings($pdo);
-            $closingTime = $settings['closing_time'] ?? '20:00';
+            $closingTime = PricingEngine::getEffectiveClosingTime($settings);
             $openingTime = $settings['opening_time'] ?? '06:00';
 
             // Validate that pickup_time is present in generatePickupSlots output

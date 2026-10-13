@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../PricingEngine.php';
 function requireVendor($pdo) {
     $session = requireRole($pdo, ['vendor', 'admin']);
     
@@ -1116,10 +1117,10 @@ function handleGetDailyAudit($pdo) {
     date_default_timezone_set('Asia/Manila');
 
     // 0. Operating hours from settings
-    $stmtSettings = $pdo->query("SELECT opening_time, closing_time FROM settings WHERE id = 1");
+    $stmtSettings = $pdo->query("SELECT * FROM settings WHERE id = 1");
     $settingsRow = $stmtSettings->fetch(PDO::FETCH_ASSOC) ?: [];
     $openingTime = !empty($settingsRow['opening_time']) ? trim($settingsRow['opening_time']) : '07:00';
-    $closingTime = !empty($settingsRow['closing_time']) ? trim($settingsRow['closing_time']) : '20:00';
+    $closingTime = PricingEngine::getEffectiveClosingTime($settingsRow);
 
     $nowTime = date('H:i');
     $openTimeFormat = date('H:i', strtotime($openingTime));

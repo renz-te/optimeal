@@ -596,7 +596,7 @@
               {{
                 settingsForm.override_for_today
                   ? "Temporary closing time for today only. Will reset automatically tomorrow."
-                  : "Fixed cafeteria closing schedule (managed via system operations; read-only)."
+                  : "The base closing time is set by the vendor under Vendor > Surplus Decay Rules. Admins can temporarily override it for today below."
               }}
             </p>
 
