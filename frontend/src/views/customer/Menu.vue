@@ -504,6 +504,31 @@
             </select>
           </div>
 
+          <!-- Payment Method Selector -->
+          <div class="mb-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span class="flex items-center gap-1.5">
+                <CreditCard :size="14" class="text-emerald-600" />
+                Payment Method
+              </span>
+              <span class="text-[10px] uppercase font-bold text-slate-600 bg-slate-200 px-2 py-0.5 rounded-full">
+                {{ paymentMethod === 'paymongo' ? 'Online' : 'Cash' }}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <label class="flex items-center gap-2 p-2.5 border rounded-lg cursor-pointer transition-all"
+                     :class="paymentMethod === 'cash' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'">
+                <input type="radio" v-model="paymentMethod" value="cash" class="text-emerald-600 focus:ring-emerald-500">
+                <span class="text-xs">Cash on Pickup</span>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 border rounded-lg cursor-pointer transition-all"
+                     :class="paymentMethod === 'paymongo' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'">
+                <input type="radio" v-model="paymentMethod" value="paymongo" class="text-emerald-600 focus:ring-emerald-500">
+                <span class="text-xs">Online Payment</span>
+              </label>
+            </div>
+          </div>
+
           <p class="text-[11px] text-slate-500 mb-6 italic text-center">*Reserves food portions; table seating is first-come, first-served.</p>
 
           <div class="flex justify-between items-center mb-2 text-sm font-medium text-slate-600">
@@ -556,6 +581,28 @@
           <div v-if="checkoutError" class="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-lg text-sm font-medium flex items-start gap-2 shadow-sm">
             <AlertTriangle :size="16" class="shrink-0 mt-0.5" />
             <span>{{ checkoutError }}</span>
+          </div>
+
+          <!-- Payment Method Selector inside claim modal -->
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+            <div class="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span class="flex items-center gap-1.5">
+                <CreditCard :size="14" class="text-emerald-600" />
+                Select Payment Method:
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition-all"
+                     :class="paymentMethod === 'cash' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold shadow-sm' : 'border-slate-200 bg-white text-slate-700'">
+                <input type="radio" v-model="paymentMethod" value="cash" class="text-emerald-600 focus:ring-emerald-500">
+                <span class="text-xs">Cash on Pickup</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition-all"
+                     :class="paymentMethod === 'paymongo' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 font-bold shadow-sm' : 'border-slate-200 bg-white text-slate-700'">
+                <input type="radio" v-model="paymentMethod" value="paymongo" class="text-emerald-600 focus:ring-emerald-500">
+                <span class="text-xs">Online Payment</span>
+              </label>
+            </div>
           </div>
 
           <button @click="processOrder('express')" class="w-full text-left p-4 border-2 border-emerald-500 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors group">
@@ -667,7 +714,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Utensils, ShoppingBag, Clock, SlidersHorizontal, AlertTriangle, X, Plus, Minus, Info, Package, UtensilsCrossed } from 'lucide-vue-next'
+import { Utensils, ShoppingBag, Clock, SlidersHorizontal, AlertTriangle, X, Plus, Minus, Info, Package, UtensilsCrossed, CreditCard } from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
 
 const router = useRouter()
@@ -747,6 +794,7 @@ const confirmedPickupTime = ref('')
 const isConvertingTakeout = ref(false)
 const takeoutConversionError = ref('')
 const orderType = ref('dine_in')
+const paymentMethod = ref('cash')
 const pickupSlots = ref([])
 const selectedPickupSlot = ref('')
 const isLoadingSlots = ref(false)
@@ -1303,6 +1351,7 @@ const processOrder = async (type) => {
         type: type,
         fulfillment_type: orderType.value,
         pickup_time: orderType.value === 'take_out' ? selectedPickupSlot.value : null,
+        payment_method: paymentMethod.value,
         allergen_override: Boolean(dangerAcknowledged.value),
         items: cart.value.map(c => ({
           menu_item_id: c.item.id,
@@ -1328,6 +1377,15 @@ const processOrder = async (type) => {
       }
       
       const data = await res.json()
+
+      if (paymentMethod.value === 'paymongo' && data.checkout_url) {
+        showCheckoutOptions.value = false
+        showPlateDrawer.value = false
+        cart.value = []
+        window.location.href = data.checkout_url
+        return
+      }
+
       confirmedToken.value = data.claim_token
       confirmedPickupTime.value = orderType.value === 'take_out' ? selectedPickupSlot.value : ''
       
