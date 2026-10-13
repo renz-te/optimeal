@@ -13,6 +13,7 @@ class PricingEngine
      */
     public static function getActiveDiscountPercent(array $settings, $current_timestamp_str = 'now'): float
     {
+        date_default_timezone_set(self::TIMEZONE);
         $tz = new DateTimeZone(self::TIMEZONE);
         $now = new DateTime($current_timestamp_str, $tz);
 
@@ -21,7 +22,7 @@ class PricingEngine
             return 50.00;
         }
 
-        $closingTimeStr = !empty($settings['closing_time']) ? trim($settings['closing_time']) : '20:00';
+        $closingTimeStr = self::getEffectiveClosingTime($settings);
         $closingTime = new DateTime($now->format('Y-m-d') . ' ' . $closingTimeStr, $tz);
 
         // If currently at or after closing time, maximum tier is active
@@ -49,6 +50,7 @@ class PricingEngine
      */
     public static function getEffectiveClosingTime(array $settings): string
     {
+        date_default_timezone_set(self::TIMEZONE);
         $tz = new DateTimeZone(self::TIMEZONE);
         $today = (new DateTime('now', $tz))->format('Y-m-d');
 
@@ -60,7 +62,8 @@ class PricingEngine
             return substr($settings['override_closing_time'], 0, 5);
         }
 
-        return substr($settings['closing_time'] ?? '20:00', 0, 5);
+        $fallback = $settings['daily_closing_time'] ?? $settings['closing_time'] ?? '20:00:00';
+        return substr($fallback, 0, 5);
     }
 
     /**
@@ -68,6 +71,7 @@ class PricingEngine
      */
     public static function isPastClosing(array $settings, string $current_timestamp_str = 'now'): bool
     {
+        date_default_timezone_set(self::TIMEZONE);
         $tz = new DateTimeZone(self::TIMEZONE);
         $now = new DateTime($current_timestamp_str, $tz);
         $effectiveClosing = self::getEffectiveClosingTime($settings);

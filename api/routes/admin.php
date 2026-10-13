@@ -363,29 +363,56 @@ function handleGetSettings(PDO $pdo): void
 
 function handleUpdateSettings(PDO $pdo): void
 {
-    requireAdmin();
+    requireAdmin($pdo);
     $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
-    $openingTime = trim($body['opening_time'] ?? '07:00');
-    $reservationTtl = max(5, min(120, (int)($body['reservation_ttl'] ?? 30)));
-    $announcement = isset($body['global_announcement']) ? trim($body['global_announcement']) : null;
-    if ($announcement === '') {
-        $announcement = null;
+    $currStmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+    $current = $currStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$current) {
+        $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, 30, '07:00', '20:00', 5, 10.00, 1)");
+        $currStmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+        $current = $currStmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    $overrideForToday = !empty($body['override_for_today']);
-    $overrideTime = null;
-    $overrideDate = null;
+    $openingTime = isset($body['opening_time']) ? trim($body['opening_time']) : ($current['opening_time'] ?? '07:00');
+    $reservationTtl = isset($body['reservation_ttl']) ? max(5, min(120, (int)$body['reservation_ttl'])) : (int)($current['reservation_ttl'] ?? 30);
+    $maxDiscountQty = isset($body['max_discount_qty']) ? max(1, (int)$body['max_discount_qty']) : (int)($current['max_discount_qty'] ?? 5);
+    $aiEnabled = isset($body['ai_enabled']) ? ($body['ai_enabled'] ? 1 : 0) : (int)($current['ai_enabled'] ?? 1);
 
-    if ($overrideForToday && !empty($body['override_closing_time'])) {
-        $rawTime = trim($body['override_closing_time']);
-        if (preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $rawTime)) {
-            $tz = new DateTimeZone('Asia/Manila');
-            $overrideTime = $rawTime . ':00';
-            $overrideDate = (new DateTime('now', $tz))->format('Y-m-d');
+    $announcement = $current['global_announcement'] ?? null;
+    if (array_key_exists('global_announcement', $body)) {
+        if ($body['global_announcement'] === null || trim((string)$body['global_announcement']) === '') {
+            $announcement = null;
         } else {
-            throw new BusinessException('Invalid override closing time format. Must be HH:MM.', 422);
+            $announcement = trim((string)$body['global_announcement']);
+            if (mb_strlen($announcement) > 255) {
+                $announcement = mb_substr($announcement, 0, 255);
+            }
         }
+    }
+
+    $overrideTime = $current['override_closing_time'] ?? null;
+    $overrideDate = $current['override_closing_date'] ?? null;
+
+    if (array_key_exists('override_for_today', $body)) {
+        $overrideForToday = !empty($body['override_for_today']);
+        if ($overrideForToday) {
+            $tz = new DateTimeZone('Asia/Manila');
+            $overrideDate = (new DateTime('now', $tz))->format('Y-m-d');
+            $rawTime = trim((string)($body['override_closing_time'] ?? ''));
+            if (preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $rawTime)) {
+                $overrideTime = strlen($rawTime) === 5 ? $rawTime . ':00' : $rawTime;
+            } else {
+                jsonResponse(['error' => 'Invalid override closing time format. Must be HH:MM.'], 422);
+                return;
+            }
+        } else {
+            $overrideTime = null;
+            $overrideDate = null;
+        }
+    } elseif (array_key_exists('override_closing_time', $body) && empty($body['override_closing_time'])) {
+        $overrideTime = null;
+        $overrideDate = null;
     }
 
     try {
@@ -393,6 +420,8 @@ function handleUpdateSettings(PDO $pdo): void
             UPDATE settings
             SET opening_time = :opening_time,
                 reservation_ttl = :reservation_ttl,
+                max_discount_qty = :max_discount_qty,
+                ai_enabled = :ai_enabled,
                 global_announcement = :global_announcement,
                 override_closing_time = :override_closing_time,
                 override_closing_date = :override_closing_date
@@ -401,6 +430,8 @@ function handleUpdateSettings(PDO $pdo): void
         $stmt->execute([
             ':opening_time' => $openingTime,
             ':reservation_ttl' => $reservationTtl,
+            ':max_discount_qty' => $maxDiscountQty,
+            ':ai_enabled' => $aiEnabled,
             ':global_announcement' => $announcement,
             ':override_closing_time' => $overrideTime,
             ':override_closing_date' => $overrideDate,

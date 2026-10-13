@@ -763,9 +763,14 @@ const fetchSettings = async () => {
       settingsForm.override_closing_time = s.override_closing_time
         ? s.override_closing_time.slice(0, 5)
         : s.closing_time || "20:00";
+      const todayManila = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Manila",
+      }).format(new Date());
+      const isDateToday =
+        s.override_closing_date &&
+        s.override_closing_date.slice(0, 10) === todayManila;
       settingsForm.override_for_today = Boolean(
-        s.is_override_active ||
-        (s.override_closing_date && s.override_closing_time),
+        s.is_override_active || (isDateToday && s.override_closing_time),
       );
       announcementText.value = s.global_announcement || "";
     }
@@ -859,9 +864,14 @@ const handleSaveSettings = async () => {
       settingsForm.override_closing_time = s.override_closing_time
         ? s.override_closing_time.slice(0, 5)
         : s.closing_time || "20:00";
+      const todayManila = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Manila",
+      }).format(new Date());
+      const isDateToday =
+        s.override_closing_date &&
+        s.override_closing_date.slice(0, 10) === todayManila;
       settingsForm.override_for_today = Boolean(
-        s.is_override_active ||
-        (s.override_closing_date && s.override_closing_time),
+        s.is_override_active || (isDateToday && s.override_closing_time),
       );
     }
 

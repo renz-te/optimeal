@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../PricingEngine.php';
+
 function requireCustomer($pdo)
 {
     $session = requireRole($pdo, ['student', 'customer']);
@@ -126,7 +128,7 @@ function handleGetPickupSlots($pdo)
 {
     date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
-    $closingTime = $settings['closing_time'] ?? '20:00';
+    $closingTime = PricingEngine::getEffectiveClosingTime($settings);
     $openingTime = $settings['opening_time'] ?? '06:00';
 
     $slots = generatePickupSlots($closingTime, 'now', $openingTime);
@@ -339,7 +341,7 @@ function handleCreateReservation($pdo)
     // Closing behavior: reject reservations after closing_time and expire unclaimed orders
     if (PricingEngine::isPastClosing($settings)) {
         expireUnclaimedOrdersAfterClosing($pdo);
-        $closingTime = $settings['closing_time'] ?? '20:00';
+        $closingTime = PricingEngine::getEffectiveClosingTime($settings);
         jsonResponse(['error' => "Cafeteria is closed. Reservations cannot be placed after closing time ($closingTime)."], 400);
     }
 
@@ -546,7 +548,7 @@ function handleCreateReservation($pdo)
     date_default_timezone_set('Asia/Manila');
     $tz = new DateTimeZone('Asia/Manila');
     $now = new DateTime('now', $tz);
-    $closingTime = $settings['closing_time'] ?? '20:00';
+    $closingTime = PricingEngine::getEffectiveClosingTime($settings);
     $openingTime = $settings['opening_time'] ?? '06:00';
 
     $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in'])
