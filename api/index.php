@@ -226,6 +226,15 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/announcement' && $method === 'GET') {
     require 'routes/admin.php';
     handleGetAnnouncement($pdo);
+} elseif (($route === '/notifications' || $route === '/api/notifications') && $method === 'GET') {
+    $session = requireRole($pdo, ['student', 'customer', 'vendor', 'admin']);
+    require 'routes/notifications.php';
+    handleGetNotifications($session['user_id']);
+} elseif (($route === '/notifications/read' || $route === '/api/notifications/read') && $method === 'POST') {
+    $session = requireRole($pdo, ['student', 'customer', 'vendor', 'admin']);
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    require 'routes/notifications.php';
+    handleMarkAsRead($session['user_id'], $input);
 } else {
     jsonResponse(['error' => 'Not Found'], 404);
 }
