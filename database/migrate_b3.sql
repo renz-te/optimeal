@@ -1,20 +1,23 @@
--- database/migrate_b3.sql
--- Idempotent column addition for settings.global_announcement
-
 SET @dbname = DATABASE();
-SET @tablename = 'settings';
 
-SET @preparedStatement = (
-    SELECT IF(
-        COUNT(*) = 0,
-        'ALTER TABLE settings ADD COLUMN global_announcement VARCHAR(255) NULL',
-        'SELECT 1'
-    )
+-- 1. override_closing_time
+SET @col_exists = (
+    SELECT COUNT(*)
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = @dbname
-      AND TABLE_NAME = @tablename
-      AND COLUMN_NAME = 'global_announcement'
+      AND TABLE_NAME = 'settings'
+      AND COLUMN_NAME = 'override_closing_time'
 );
-PREPARE stmt FROM @preparedStatement;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+SET @sql = IF(@col_exists = 0, 'ALTER TABLE settings ADD COLUMN override_closing_time TIME NULL;', 'SELECT 1;');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 2. override_closing_date
+SET @col_exists2 = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @dbname
+      AND TABLE_NAME = 'settings'
+      AND COLUMN_NAME = 'override_closing_date'
+);
+SET @sql2 = IF(@col_exists2 = 0, 'ALTER TABLE settings ADD COLUMN override_closing_date DATE NULL;', 'SELECT 1;');
+PREPARE stmt FROM @sql2; EXECUTE stmt; DEALLOCATE PREPARE stmt;

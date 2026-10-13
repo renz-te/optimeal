@@ -1,10 +1,12 @@
 <?php
-function requireCustomer($pdo) {
+function requireCustomer($pdo)
+{
     $session = requireRole($pdo, ['student', 'customer']);
     return $session['user_id'];
 }
 
-function getCustomerSettings($pdo) {
+function getCustomerSettings($pdo)
+{
     $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$settings) {
@@ -15,7 +17,8 @@ function getCustomerSettings($pdo) {
     return $settings;
 }
 
-function expireUnclaimedOrdersAfterClosing($pdo) {
+function expireUnclaimedOrdersAfterClosing($pdo)
+{
     try {
         $pdo->beginTransaction();
         $stmt = $pdo->prepare("SELECT id FROM orders WHERE status = 'reserved'");
@@ -58,10 +61,11 @@ function expireUnclaimedOrdersAfterClosing($pdo) {
     }
 }
 
-function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now', $openingTimeStr = null) {
+function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now', $openingTimeStr = null)
+{
     date_default_timezone_set('Asia/Manila');
     $tz = new DateTimeZone('Asia/Manila');
-    
+
     try {
         $now = new DateTime($currentTimeStr, $tz);
     } catch (Exception $e) {
@@ -99,7 +103,7 @@ function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now', $openingT
         $currentMinutes = (int)$now->format('i');
         $currentSeconds = (int)$now->format('s');
         $remainder = $currentMinutes % 15;
-        
+
         $minutesToAdd = (15 - $remainder);
         if ($remainder === 0 && $currentSeconds === 0) {
             $minutesToAdd = 15;
@@ -118,14 +122,15 @@ function generatePickupSlots($closingTimeStr, $currentTimeStr = 'now', $openingT
     return $slots;
 }
 
-function handleGetPickupSlots($pdo) {
+function handleGetPickupSlots($pdo)
+{
     date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
     $closingTime = $settings['closing_time'] ?? '20:00';
     $openingTime = $settings['opening_time'] ?? '06:00';
-    
+
     $slots = generatePickupSlots($closingTime, 'now', $openingTime);
-    
+
     jsonResponse([
         'closing_time' => $closingTime,
         'opening_time' => $openingTime,
@@ -134,12 +139,13 @@ function handleGetPickupSlots($pdo) {
     ]);
 }
 
-function handleGetMenu($pdo) {
+function handleGetMenu($pdo)
+{
     date_default_timezone_set('Asia/Manila');
     $settings = getCustomerSettings($pdo);
 
     $openingTime = !empty($settings['opening_time']) ? trim($settings['opening_time']) : '07:00';
-    $closingTime = !empty($settings['closing_time']) ? trim($settings['closing_time']) : '20:00';
+    $closingTime = PricingEngine::getEffectiveClosingTime($settings);
 
     // Closing behavior: after closing_time, menu endpoint returns no purchasable items
     if (PricingEngine::isPastClosing($settings)) {
@@ -218,7 +224,7 @@ function handleGetMenu($pdo) {
         ");
         $sstmt->execute([$item['id']]);
         $digestive_sensitivities = $sstmt->fetchAll(PDO::FETCH_COLUMN);
-        
+
         // 3. Fetch ingredients
         $istmt = $pdo->prepare("
             SELECT i.name 
@@ -257,7 +263,7 @@ function handleGetMenu($pdo) {
                 $ingredients[] = $formatted;
             }
         }
-        
+
         // Parse dietary JSON
         $dietary = [];
         if (!empty($item['dietary'])) {
@@ -266,7 +272,7 @@ function handleGetMenu($pdo) {
                 $dietary = $parsed;
             }
         }
-        
+
         // Conditionally include macros
         $macros = null;
         if (!empty($item['ai_confirmed'])) {
@@ -302,7 +308,7 @@ function handleGetMenu($pdo) {
     }
 
     // 3. Sort items: critical allergens to the bottom
-    usort($result, function($a, $b) {
+    usort($result, function ($a, $b) {
         if ($a['has_critical'] == $b['has_critical']) {
             return strcmp($a['name'], $b['name']);
         }
@@ -318,10 +324,11 @@ function handleGetMenu($pdo) {
     ]);
 }
 
-function handleCreateReservation($pdo) {
+function handleCreateReservation($pdo)
+{
     $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
-    
+
     // Expects: { "items": [ {"menu_item_id": 1, "quantity": 1, "portion_preference": "lean_meat", "ack": true} ] }
     if (!isset($input['items']) || !is_array($input['items'])) {
         jsonResponse(['error' => 'Missing items'], 400);
@@ -357,13 +364,13 @@ function handleCreateReservation($pdo) {
     $allergenConflictsJson = null;
 
     if (!empty($userAllergens) && count($input['items']) > 0) {
-        $itemIds = array_values(array_filter(array_map(function($i) {
+        $itemIds = array_values(array_filter(array_map(function ($i) {
             return isset($i['menu_item_id']) ? (int)$i['menu_item_id'] : 0;
         }, $input['items'])));
 
         if (count($itemIds) > 0) {
             $placeholders = str_repeat('?,', count($itemIds) - 1) . '?';
-            
+
             // 1. Fetch mapped critical allergens for ordered dishes
             $stmtAllergens = $pdo->prepare("
                 SELECT DISTINCT ca.name 
@@ -542,8 +549,8 @@ function handleCreateReservation($pdo) {
     $closingTime = $settings['closing_time'] ?? '20:00';
     $openingTime = $settings['opening_time'] ?? '06:00';
 
-    $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in']) 
-        ? $input['fulfillment_type'] 
+    $fulfillment_type = !empty($input['fulfillment_type']) && in_array($input['fulfillment_type'], ['take_out', 'dine_in'])
+        ? $input['fulfillment_type']
         : 'dine_in';
 
     $pickup_time = null;
@@ -573,7 +580,7 @@ function handleCreateReservation($pdo) {
     $pdo->beginTransaction();
     try {
         $total_amount = 0;
-        
+
         do {
             $claimToken = str_pad(random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
             $checkToken = $pdo->prepare("SELECT 1 FROM orders WHERE store_id = ? AND claim_token = ? AND status IN ('pending', 'ready', 'reserved', 'paid')");
@@ -604,14 +611,20 @@ function handleCreateReservation($pdo) {
             ) VALUES (?, ?, 'reserved', ?, ?, ?, ?, 'none', ?, ?)
         ");
         $insertOrder->execute([
-            $user_id, $store_id, $expiryTimeFormatted, $claimToken, 
-            $fulfillment_type, $pickup_time, $isAllergenOverride, $allergenConflictsJson
+            $user_id,
+            $store_id,
+            $expiryTimeFormatted,
+            $claimToken,
+            $fulfillment_type,
+            $pickup_time,
+            $isAllergenOverride,
+            $allergenConflictsJson
         ]);
         $order_id = $pdo->lastInsertId();
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
         $updateInventory = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty - ?, delisted_from_app = CASE WHEN online_pool_qty - ? <= critical_stock_threshold THEN 1 ELSE 0 END WHERE menu_item_id = ? AND online_pool_qty >= ?");
-        
+
         $checkClaims = $pdo->prepare("SELECT quantity_claimed FROM daily_discount_claims WHERE user_id = ? AND menu_item_id = ? AND claim_date = CURDATE()");
         $upsertClaims = $pdo->prepare("INSERT INTO daily_discount_claims (user_id, menu_item_id, claim_date, quantity_claimed) VALUES (?, ?, CURDATE(), ?) ON DUPLICATE KEY UPDATE quantity_claimed = quantity_claimed + ?");
 
@@ -629,7 +642,7 @@ function handleCreateReservation($pdo) {
             ");
             $stmt->execute([$item_id]);
             $itemData = $stmt->fetch();
-            
+
             $dishName = $itemData ? $itemData['name'] : "Item $item_id";
             $availableQty = $itemData ? max(0, (int)$itemData['online_pool_qty']) : 0;
 
@@ -668,16 +681,16 @@ function handleCreateReservation($pdo) {
             }
 
             $allowedPrefs = ['no_preference', 'lean_meat', 'bone_fat', 'extra_sauce'];
-            $portionPref = in_array($item['portion_preference'] ?? '', $allowedPrefs) 
-                ? $item['portion_preference'] 
+            $portionPref = in_array($item['portion_preference'] ?? '', $allowedPrefs)
+                ? $item['portion_preference']
                 : 'no_preference';
 
             $insertItem->execute([
-                $order_id, 
-                $item_id, 
-                $qty, 
-                $current_price, 
-                $portionPref, 
+                $order_id,
+                $item_id,
+                $qty,
+                $current_price,
+                $portionPref,
                 $item['ack'] ?? 0
             ]);
 
@@ -690,7 +703,7 @@ function handleCreateReservation($pdo) {
         }
 
         $pdo->prepare("UPDATE orders SET total_amount = ? WHERE id = ?")->execute([$total_amount, $order_id]);
-        
+
         $pdo->commit();
         jsonResponse(['message' => 'Reservation created', 'order_id' => $order_id, 'total_amount' => $total_amount, 'claim_token' => $claimToken]);
     } catch (BusinessException $e) {
@@ -708,7 +721,8 @@ function handleCreateReservation($pdo) {
     }
 }
 
-function handlePayReservation($pdo, $order_id) {
+function handlePayReservation($pdo, $order_id)
+{
     $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
     $method = $input['method'] ?? 'e-wallet';
@@ -753,15 +767,17 @@ function handlePayReservation($pdo, $order_id) {
     }
 }
 
-function handleGetCustomerOrders($pdo) {
+function handleGetCustomerOrders($pdo)
+{
     $user_id = requireCustomer($pdo);
-    
+
     $stmt = $pdo->prepare("SELECT id, store_id, status, reserved_at, ttl_expires_at, claim_token, total_amount, fulfillment_type, pickup_time, notification_status, allergen_override, allergen_conflicts FROM orders WHERE user_id = ? ORDER BY reserved_at DESC");
     $stmt->execute([$user_id]);
     jsonResponse($stmt->fetchAll());
 }
 
-function handleGetMyOrders($pdo) {
+function handleGetMyOrders($pdo)
+{
     $user_id = requireCustomer($pdo);
 
     $stmt = $pdo->prepare("
@@ -804,7 +820,8 @@ function handleGetMyOrders($pdo) {
     jsonResponse($orders);
 }
 
-function handleUpdateFulfillment($pdo) {
+function handleUpdateFulfillment($pdo)
+{
     $user_id = requireCustomer($pdo);
     $input = json_decode(file_get_contents('php://input'), true);
 
@@ -910,7 +927,8 @@ function handleUpdateFulfillment($pdo) {
     }
 }
 
-function handleGetProfile($pdo) {
+function handleGetProfile($pdo)
+{
     $user_id = $_SESSION['user_id'] ?? null;
     if (!$user_id) {
         jsonResponse(['error' => 'Unauthorized'], 401);
@@ -949,7 +967,8 @@ function handleGetProfile($pdo) {
     ]);
 }
 
-function handleUpdateProfile($pdo) {
+function handleUpdateProfile($pdo)
+{
     $user_id = $_SESSION['user_id'] ?? null;
     if (!$user_id) {
         jsonResponse(['error' => 'Unauthorized'], 401);
@@ -1003,4 +1022,3 @@ function handleUpdateProfile($pdo) {
         jsonResponse(['error' => 'An unexpected database error occurred.'], 500);
     }
 }
-

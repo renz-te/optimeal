@@ -1,6 +1,7 @@
 <?php
 
-class PricingEngine {
+class PricingEngine
+{
     const TIMEZONE = 'Asia/Manila';
 
     /**
@@ -10,7 +11,8 @@ class PricingEngine {
      * @param string $current_timestamp_str Optional timestamp string for testing (default: 'now')
      * @return float Active discount percent (0.00, tier1, tier2, or 50.00)
      */
-    public static function getActiveDiscountPercent(array $settings, $current_timestamp_str = 'now'): float {
+    public static function getActiveDiscountPercent(array $settings, $current_timestamp_str = 'now'): float
+    {
         $tz = new DateTimeZone(self::TIMEZONE);
         $now = new DateTime($current_timestamp_str, $tz);
 
@@ -42,20 +44,40 @@ class PricingEngine {
     }
 
     /**
-     * Check if current time in Asia/Manila is past the cafeteria closing time.
-     *
-     * @param array $settings
-     * @param string $current_timestamp_str
-     * @return bool
+     * Resolves the effective closing time (HH:MM).
+     * Uses override_closing_time if override_closing_date matches today in Asia/Manila.
      */
-    public static function isPastClosing(array $settings, $current_timestamp_str = 'now'): bool {
+    public static function getEffectiveClosingTime(array $settings): string
+    {
+        $tz = new DateTimeZone(self::TIMEZONE);
+        $today = (new DateTime('now', $tz))->format('Y-m-d');
+
+        if (
+            !empty($settings['override_closing_date']) &&
+            $settings['override_closing_date'] === $today &&
+            !empty($settings['override_closing_time'])
+        ) {
+            return substr($settings['override_closing_time'], 0, 5);
+        }
+
+        return substr($settings['closing_time'] ?? '20:00', 0, 5);
+    }
+
+    /**
+     * Returns true if current Manila time is equal to or past the effective closing time.
+     */
+    public static function isPastClosing(array $settings, string $current_timestamp_str = 'now'): bool
+    {
         $tz = new DateTimeZone(self::TIMEZONE);
         $now = new DateTime($current_timestamp_str, $tz);
+        $effectiveClosing = self::getEffectiveClosingTime($settings);
 
-        $closingTimeStr = !empty($settings['closing_time']) ? trim($settings['closing_time']) : '20:00';
-        $closingTime = new DateTime($now->format('Y-m-d') . ' ' . $closingTimeStr, $tz);
+        $closingDt = DateTime::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $effectiveClosing, $tz);
+        if (!$closingDt) {
+            return false;
+        }
 
-        return $now >= $closingTime;
+        return $now >= $closingDt;
     }
 
     /**
@@ -80,7 +102,7 @@ class PricingEngine {
         $discountPercent = self::getActiveDiscountPercent($settings, $current_timestamp_str);
 
         // Stepped, non-compounding discount
-        $discountedPrice = $discountPercent > 0 
+        $discountedPrice = $discountPercent > 0
             ? round($basePrice * (1 - ($discountPercent / 100)), 2)
             : $basePrice;
 

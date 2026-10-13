@@ -1,6 +1,10 @@
 <?php
 
-function handleGetUsers($pdo) {
+require_once __DIR__ . '/../PricingEngine.php';
+
+
+function handleGetUsers($pdo)
+{
     try {
         $stmt = $pdo->query("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC");
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -11,7 +15,8 @@ function handleGetUsers($pdo) {
     }
 }
 
-function handleCreateUser($pdo) {
+function handleCreateUser($pdo)
+{
     try {
         $input = json_decode(file_get_contents('php://input'), true);
         if (!isset($input['name'], $input['email'], $input['password'], $input['role'])) {
@@ -74,14 +79,16 @@ function handleCreateUser($pdo) {
     }
 }
 
-function handleGetTaxonomy($pdo) {
+function handleGetTaxonomy($pdo)
+{
     try {
         $allergens = $pdo->query("SELECT id, name FROM critical_allergens ORDER BY name ASC")->fetchAll(PDO::FETCH_ASSOC);
-        
+
         $sensitivities = [];
         try {
             $sensitivities = $pdo->query("SELECT id, name FROM digestive_sensitivities ORDER BY name ASC")->fetchAll(PDO::FETCH_ASSOC);
-        } catch (Exception $e) {}
+        } catch (Exception $e) {
+        }
 
         $stmt = $pdo->query("
             SELECT i.id, i.name, 
@@ -94,7 +101,7 @@ function handleGetTaxonomy($pdo) {
             ORDER BY i.name ASC
         ");
         $ingredientsRaw = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         $ingredients = [];
         foreach ($ingredientsRaw as $row) {
             $allergenIds = !empty($row['allergen_ids']) ? array_map('intval', explode(',', $row['allergen_ids'])) : [];
@@ -118,7 +125,8 @@ function handleGetTaxonomy($pdo) {
     }
 }
 
-function handleUpdateIngredient($pdo) {
+function handleUpdateIngredient($pdo)
+{
     $input = json_decode(file_get_contents('php://input'), true);
     if (!isset($input['name']) || trim($input['name']) === '') {
         jsonResponse(['error' => 'Ingredient name is required.'], 400);
@@ -184,7 +192,8 @@ function handleUpdateIngredient($pdo) {
     }
 }
 
-function handleGetPendingIngredients($pdo) {
+function handleGetPendingIngredients($pdo)
+{
     try {
         $stmt = $pdo->query("
             SELECT id, raw_name, status, resolved_ingredient_id, created_at 
@@ -200,7 +209,8 @@ function handleGetPendingIngredients($pdo) {
     }
 }
 
-function handleResolveSubmission($pdo) {
+function handleResolveSubmission($pdo)
+{
     $input = json_decode(file_get_contents('php://input'), true);
     if (!isset($input['submission_id'], $input['action'])) {
         jsonResponse(['error' => 'Missing required fields: submission_id and action are required.'], 400);
@@ -272,7 +282,6 @@ function handleResolveSubmission($pdo) {
                     'allergen_ids' => array_map('intval', $allergenIds)
                 ]
             ]);
-
         } elseif ($action === 'link_to_existing') {
             if (!isset($input['existing_ingredient_id']) || (int)$input['existing_ingredient_id'] <= 0) {
                 $pdo->rollBack();
@@ -301,7 +310,6 @@ function handleResolveSubmission($pdo) {
                 'status' => 'approved',
                 'ingredient' => $ingredient
             ]);
-
         } elseif ($action === 'reject') {
             $updSubStmt = $pdo->prepare("UPDATE ingredient_submissions SET status = 'rejected' WHERE id = ?");
             $updSubStmt->execute([$submissionId]);
@@ -325,99 +333,88 @@ function handleResolveSubmission($pdo) {
     }
 }
 
-function handleGetSettings($pdo) {
-    try {
-        $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement, updated_at FROM settings WHERE id = 1");
-        $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+function handleGetSettings(PDO $pdo): void
+{
+    requireAdmin($pdo);
+    $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$settings) {
-            $pdo->exec("INSERT IGNORE INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled) VALUES (1, 30, '07:00', '20:00', 5, 10.00, 1)");
-            $stmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement, updated_at FROM settings WHERE id = 1");
-            $settings = $stmt->fetch(PDO::FETCH_ASSOC);
-        }
-
-        jsonResponse([
-            'settings' => [
-                'id' => (int)$settings['id'],
-                'reservation_ttl' => (int)$settings['reservation_ttl'],
-                'opening_time' => $settings['opening_time'],
-                'closing_time' => $settings['closing_time'],
-                'max_discount_qty' => (int)$settings['max_discount_qty'],
-                'default_decay_rate' => (float)$settings['default_decay_rate'],
-                'ai_enabled' => (bool)$settings['ai_enabled'],
-                'global_announcement' => $settings['global_announcement'] ?? null,
-                'updated_at' => $settings['updated_at']
-            ]
-        ]);
-    } catch (Exception $e) {
-        error_log("handleGetSettings error: " . $e->getMessage());
-        jsonResponse(['error' => 'Failed to fetch settings due to an internal server error.'], 500);
+    if (!$settings) {
+        jsonResponse(['error' => 'Settings not found'], 404);
+        return;
     }
+
+    $tz = new DateTimeZone('Asia/Manila');
+    $today = (new DateTime('now', $tz))->format('Y-m-d');
+    $isOverrideActive = (!empty($settings['override_closing_date']) &&
+        $settings['override_closing_date'] === $today &&
+        !empty($settings['override_closing_time']));
+
+    $effectiveClosing = PricingEngine::getEffectiveClosingTime($settings);
+
+    $settings['effective_closing_time'] = $effectiveClosing;
+    $settings['is_override_active'] = $isOverrideActive;
+
+    jsonResponse([
+        'settings' => $settings,
+        'data' => $settings
+    ]);
 }
 
-function handleUpdateSettings($pdo) {
-    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+function handleUpdateSettings(PDO $pdo): void
+{
+    requireAdmin();
+    $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
-    // Fetch current settings to preserve any unspecified fields
-    $currStmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
-    $current = $currStmt->fetch(PDO::FETCH_ASSOC);
+    $openingTime = trim($body['opening_time'] ?? '07:00');
+    $reservationTtl = max(5, min(120, (int)($body['reservation_ttl'] ?? 30)));
+    $announcement = isset($body['global_announcement']) ? trim($body['global_announcement']) : null;
+    if ($announcement === '') {
+        $announcement = null;
+    }
 
-    $reservationTtl = isset($input['reservation_ttl']) ? max(1, (int)$input['reservation_ttl']) : ($current ? (int)$current['reservation_ttl'] : 30);
-    $openingTime = isset($input['opening_time']) ? trim($input['opening_time']) : ($current ? $current['opening_time'] : '07:00');
-    // D2 & D3: Do not accept or save edits to closing_time and default_decay_rate
-    $maxDiscountQty = isset($input['max_discount_qty']) ? max(0, (int)$input['max_discount_qty']) : ($current ? (int)$current['max_discount_qty'] : 5);
-    $aiEnabled = isset($input['ai_enabled']) ? ($input['ai_enabled'] ? 1 : 0) : ($current ? (int)$current['ai_enabled'] : 1);
+    $overrideForToday = !empty($body['override_for_today']);
+    $overrideTime = null;
+    $overrideDate = null;
 
-    $globalAnnouncement = $current ? ($current['global_announcement'] ?? null) : null;
-    if (array_key_exists('global_announcement', $input)) {
-        if ($input['global_announcement'] === null || trim($input['global_announcement']) === '') {
-            $globalAnnouncement = null;
+    if ($overrideForToday && !empty($body['override_closing_time'])) {
+        $rawTime = trim($body['override_closing_time']);
+        if (preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $rawTime)) {
+            $tz = new DateTimeZone('Asia/Manila');
+            $overrideTime = $rawTime . ':00';
+            $overrideDate = (new DateTime('now', $tz))->format('Y-m-d');
         } else {
-            $globalAnnouncement = trim($input['global_announcement']);
-            if (mb_strlen($globalAnnouncement) > 255) {
-                $globalAnnouncement = mb_substr($globalAnnouncement, 0, 255);
-            }
+            throw new BusinessException('Invalid override closing time format. Must be HH:MM.', 422);
         }
     }
 
     try {
         $stmt = $pdo->prepare("
-            UPDATE settings 
-            SET reservation_ttl = ?, opening_time = ?, max_discount_qty = ?, ai_enabled = ?, global_announcement = ? 
+            UPDATE settings
+            SET opening_time = :opening_time,
+                reservation_ttl = :reservation_ttl,
+                global_announcement = :global_announcement,
+                override_closing_time = :override_closing_time,
+                override_closing_date = :override_closing_date
             WHERE id = 1
         ");
-        $stmt->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled, $globalAnnouncement]);
-
-        // If no row updated, ensure row 1 exists
-        if ($stmt->rowCount() === 0 && !$current) {
-            $ins = $pdo->prepare("INSERT INTO settings (id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement) VALUES (1, ?, ?, '20:00', ?, 10.00, ?, ?)");
-            $ins->execute([$reservationTtl, $openingTime, $maxDiscountQty, $aiEnabled, $globalAnnouncement]);
-        }
-
-        $fetchStmt = $pdo->query("SELECT id, reservation_ttl, opening_time, closing_time, max_discount_qty, default_decay_rate, ai_enabled, global_announcement, updated_at FROM settings WHERE id = 1");
-        $updated = $fetchStmt->fetch(PDO::FETCH_ASSOC);
-
-        jsonResponse([
-            'message' => 'Settings updated successfully',
-            'settings' => [
-                'id' => (int)$updated['id'],
-                'reservation_ttl' => (int)$updated['reservation_ttl'],
-                'opening_time' => $updated['opening_time'],
-                'closing_time' => $updated['closing_time'],
-                'max_discount_qty' => (int)$updated['max_discount_qty'],
-                'default_decay_rate' => (float)$updated['default_decay_rate'],
-                'ai_enabled' => (bool)$updated['ai_enabled'],
-                'global_announcement' => $updated['global_announcement'] ?? null,
-                'updated_at' => $updated['updated_at']
-            ]
+        $stmt->execute([
+            ':opening_time' => $openingTime,
+            ':reservation_ttl' => $reservationTtl,
+            ':global_announcement' => $announcement,
+            ':override_closing_time' => $overrideTime,
+            ':override_closing_date' => $overrideDate,
         ]);
-    } catch (Exception $e) {
-        error_log("handleUpdateSettings error: " . $e->getMessage());
-        jsonResponse(['error' => 'Failed to update settings due to an internal server error.'], 500);
+
+        handleGetSettings($pdo);
+    } catch (PDOException $e) {
+        error_log("Failed to update settings: " . $e->getMessage());
+        jsonResponse(['error' => 'An internal server error occurred.'], 500);
     }
 }
 
-function handleGetAnnouncement($pdo) {
+function handleGetAnnouncement($pdo)
+{
     try {
         $stmt = $pdo->query("SELECT global_announcement FROM settings WHERE id = 1");
         $announcement = $stmt ? $stmt->fetchColumn() : null;
@@ -430,7 +427,8 @@ function handleGetAnnouncement($pdo) {
     }
 }
 
-function handleGetDashboardMetrics($pdo) {
+function handleGetDashboardMetrics($pdo)
+{
     try {
         // 1. Users metrics
         $userStmt = $pdo->query("
@@ -488,7 +486,8 @@ function handleGetDashboardMetrics($pdo) {
         try {
             $cacheStmt = $pdo->query("SELECT COUNT(*) FROM ai_query_cache");
             $cacheCount = (int)$cacheStmt->fetchColumn();
-        } catch (Exception $e) {}
+        } catch (Exception $e) {
+        }
 
         jsonResponse([
             'users' => [
@@ -524,6 +523,3 @@ function handleGetDashboardMetrics($pdo) {
         jsonResponse(['error' => 'Failed to calculate metrics due to an internal server error.'], 500);
     }
 }
-
-
-
