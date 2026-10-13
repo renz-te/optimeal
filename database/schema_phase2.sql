@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS orders (
     allergen_override TINYINT(1) NOT NULL DEFAULT 0,
     allergen_conflicts TEXT NULL,
     handled_by INT NULL,
+    payment_status ENUM('unpaid', 'paid', 'failed') NOT NULL DEFAULT 'unpaid',
+    payment_method VARCHAR(50) NOT NULL DEFAULT 'cash',
+    paymongo_session_id VARCHAR(255) DEFAULT NULL,
+    paymongo_payment_id VARCHAR(255) DEFAULT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
     INDEX idx_orders_ttl_expires_at (ttl_expires_at)

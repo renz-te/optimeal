@@ -133,3 +133,28 @@ CREATE TABLE IF NOT EXISTS notifications (
     INDEX idx_notifications_user_created (user_id, created_at)
 );
 
+-- Orders table
+CREATE TABLE IF NOT EXISTS orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    store_id INT NOT NULL,
+    status ENUM('reserved', 'paid', 'claimed', 'expired', 'cancelled') NOT NULL DEFAULT 'reserved',
+    reserved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ttl_expires_at TIMESTAMP NULL,
+    claim_token VARCHAR(255) UNIQUE,
+    total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    fulfillment_type VARCHAR(50) NOT NULL DEFAULT 'dine_in',
+    pickup_time VARCHAR(10) DEFAULT NULL,
+    notification_status ENUM('none', 'ready_sent') NOT NULL DEFAULT 'none',
+    allergen_override TINYINT(1) NOT NULL DEFAULT 0,
+    allergen_conflicts TEXT NULL,
+    handled_by INT NULL,
+    payment_status ENUM('unpaid', 'paid', 'failed') NOT NULL DEFAULT 'unpaid',
+    payment_method VARCHAR(50) NOT NULL DEFAULT 'cash',
+    paymongo_session_id VARCHAR(255) DEFAULT NULL,
+    paymongo_payment_id VARCHAR(255) DEFAULT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+    INDEX idx_orders_ttl_expires_at (ttl_expires_at)
+);
+

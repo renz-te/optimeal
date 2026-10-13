@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../PricingEngine.php';
+require_once __DIR__ . '/../services/PayMongoService.php';
 
 function requireCustomer($pdo)
 {
@@ -555,6 +556,10 @@ function handleCreateReservation($pdo)
         ? $input['fulfillment_type']
         : 'dine_in';
 
+    $payment_method = !empty($input['payment_method']) && in_array(strtolower($input['payment_method']), ['paymongo', 'cash'], true)
+        ? strtolower($input['payment_method'])
+        : 'cash';
+
     $pickup_time = null;
     $pickupDateTime = null;
     if ($fulfillment_type === 'take_out') {
@@ -609,8 +614,8 @@ function handleCreateReservation($pdo)
             INSERT INTO orders (
                 user_id, store_id, status, ttl_expires_at, claim_token, 
                 fulfillment_type, pickup_time, notification_status, 
-                allergen_override, allergen_conflicts
-            ) VALUES (?, ?, 'reserved', ?, ?, ?, ?, 'none', ?, ?)
+                allergen_override, allergen_conflicts, payment_status, payment_method
+            ) VALUES (?, ?, 'reserved', ?, ?, ?, ?, 'none', ?, ?, 'unpaid', ?)
         ");
         $insertOrder->execute([
             $user_id,
@@ -620,9 +625,12 @@ function handleCreateReservation($pdo)
             $fulfillment_type,
             $pickup_time,
             $isAllergenOverride,
-            $allergenConflictsJson
+            $allergenConflictsJson,
+            $payment_method
         ]);
         $order_id = $pdo->lastInsertId();
+
+        $paymongoLineItems = [];
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
         $updateInventory = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty - ?, delisted_from_app = CASE WHEN online_pool_qty - ? <= critical_stock_threshold THEN 1 ELSE 0 END WHERE menu_item_id = ? AND online_pool_qty >= ?");
@@ -698,13 +706,43 @@ function handleCreateReservation($pdo)
 
             $total_amount += ($current_price * $qty);
 
+            $paymongoLineItems[] = [
+                'name' => $dishName,
+                'quantity' => $qty,
+                'amount' => (int)round($current_price * 100),
+                'currency' => 'PHP'
+            ];
+
             $updateInventory->execute([$qty, $qty, $item_id, $qty]);
             if ($updateInventory->rowCount() === 0) {
                 throw new BusinessException("Out of stock: Only 0 portions of {$dishName} remaining.", 400);
             }
         }
 
-        $pdo->prepare("UPDATE orders SET total_amount = ? WHERE id = ?")->execute([$total_amount, $order_id]);
+        $checkoutSession = null;
+        if ($payment_method === 'paymongo') {
+            $origin = $_SERVER['HTTP_ORIGIN'] ?? ($_SERVER['HTTP_REFERER'] ?? 'http://localhost:5173');
+            $originParsed = parse_url($origin);
+            $originUrl = ($originParsed && !empty($originParsed['scheme']) && !empty($originParsed['host']))
+                ? $originParsed['scheme'] . '://' . $originParsed['host'] . (!empty($originParsed['port']) ? ':' . $originParsed['port'] : '')
+                : 'http://localhost:5173';
+
+            $successUrl = $input['success_url'] ?? "{$originUrl}/customer/orders?payment=success&order_id={$order_id}";
+            $cancelUrl = $input['cancel_url'] ?? "{$originUrl}/customer/orders?payment=cancelled&order_id={$order_id}";
+            $description = "OptiMeal Order #{$order_id}";
+
+            $checkoutSession = PayMongoService::createCheckoutSession(
+                $paymongoLineItems,
+                $successUrl,
+                $cancelUrl,
+                $description
+            );
+
+            $sessionId = $checkoutSession['id'] ?? null;
+            $pdo->prepare("UPDATE orders SET total_amount = ?, paymongo_session_id = ? WHERE id = ?")->execute([$total_amount, $sessionId, $order_id]);
+        } else {
+            $pdo->prepare("UPDATE orders SET total_amount = ? WHERE id = ?")->execute([$total_amount, $order_id]);
+        }
 
         $pdo->commit();
 
@@ -728,7 +766,21 @@ function handleCreateReservation($pdo)
             error_log("Failed to dispatch new_order notification: " . $e->getMessage());
         }
 
-        jsonResponse(['message' => 'Reservation created', 'order_id' => $order_id, 'total_amount' => $total_amount, 'claim_token' => $claimToken]);
+        $responsePayload = [
+            'message' => 'Reservation created',
+            'order_id' => $order_id,
+            'total_amount' => $total_amount,
+            'claim_token' => $claimToken,
+            'payment_method' => $payment_method,
+            'payment_status' => 'unpaid'
+        ];
+
+        if ($payment_method === 'paymongo' && !empty($checkoutSession['checkout_url'])) {
+            $responsePayload['checkout_url'] = $checkoutSession['checkout_url'];
+            $responsePayload['paymongo_session_id'] = $checkoutSession['id'] ?? null;
+        }
+
+        jsonResponse($responsePayload);
     } catch (BusinessException $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
