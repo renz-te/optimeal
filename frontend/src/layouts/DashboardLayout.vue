@@ -2,9 +2,76 @@
   <div class="flex h-screen bg-slate-100 font-sans antialiased text-slate-900 overflow-hidden">
     <!-- Desktop Sidebar -->
     <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full flex-shrink-0 relative z-20 shadow-xl">
-      <div class="p-6">
-        <h1 class="text-2xl font-black text-emerald-400 tracking-tight">OptiMeal</h1>
-        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">{{ role === 'admin' ? 'System Admin' : 'Vendor Portal' }}</div>
+      <div class="p-6 flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-black text-emerald-400 tracking-tight">OptiMeal</h1>
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">{{ role === 'admin' ? 'System Admin' : 'Vendor Portal' }}</div>
+        </div>
+
+        <!-- Notification Bell -->
+        <div class="relative">
+          <button 
+            @click="isDropdownOpen = !isDropdownOpen" 
+            class="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors focus:outline-none"
+            title="Notifications"
+          >
+            <Bell :size="18" />
+            <span 
+              v-if="unreadCount > 0" 
+              class="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 bg-rose-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none shadow-sm"
+            >
+              {{ unreadCount > 99 ? '99+' : unreadCount }}
+            </span>
+          </button>
+
+          <!-- Backdrop -->
+          <div v-if="isDropdownOpen" class="fixed inset-0 z-40" @click="isDropdownOpen = false"></div>
+
+          <!-- Notification Dropdown -->
+          <div 
+            v-if="isDropdownOpen" 
+            class="absolute left-0 mt-2 w-80 bg-white text-slate-900 rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 overflow-hidden"
+          >
+            <div class="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+              <div class="flex items-center space-x-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Notifications</span>
+                <span v-if="unreadCount > 0" class="text-[10px] bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded-full">
+                  {{ unreadCount }} new
+                </span>
+              </div>
+              <button 
+                v-if="notifications.length > 0" 
+                @click="handleMarkAllRead" 
+                class="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
+              >
+                Mark all as read
+              </button>
+            </div>
+
+            <div class="max-h-80 overflow-y-auto divide-y divide-slate-100 text-xs">
+              <div v-if="notifications.length === 0" class="py-8 text-center text-slate-400 font-medium">
+                No new notifications.
+              </div>
+              <div 
+                v-for="notif in notifications" 
+                :key="notif.id" 
+                class="px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer text-left"
+                :class="{ 'bg-emerald-50/40': !notif.is_read }"
+                @click="handleMarkSingleRead(notif)"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <p class="text-slate-800 leading-snug" :class="{ 'font-bold text-slate-900': !notif.is_read }">
+                    {{ notif.message }}
+                  </p>
+                  <span v-if="!notif.is_read" class="w-2 h-2 rounded-full bg-emerald-500 shrink-0 mt-1"></span>
+                </div>
+                <span class="text-[10px] text-slate-400 mt-1 block">
+                  {{ formatTime(notif.created_at) }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       
       <nav class="flex-1 px-4 space-y-1.5 overflow-y-auto hide-scrollbar">
@@ -82,7 +149,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   LayoutDashboard,
@@ -96,9 +163,11 @@ import {
   LineChart,
   LogOut,
   Megaphone,
-  X
+  X,
+  Bell
 } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
+import { getNotifications, markNotificationsRead } from '../services/api'
 
 const router = useRouter()
 const { activePreviewMode, clearSandbox } = useSandbox()
@@ -108,6 +177,65 @@ const userEmail = ref('')
 
 const globalAnnouncement = ref('')
 const isAnnouncementDismissed = ref(false)
+
+// Notifications state
+const notifications = ref([])
+const unreadCount = ref(0)
+const isDropdownOpen = ref(false)
+let pollIntervalId = null
+
+const fetchNotifications = async () => {
+  const data = localStorage.getItem('optimeal_user')
+  if (!data) {
+    notifications.value = []
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const res = await getNotifications()
+    notifications.value = res.notifications || []
+    unreadCount.value = Number(res.unread_count) || 0
+  } catch (e) {
+    // Ignore unauthenticated or network glitches during polling
+  }
+}
+
+const handleMarkAllRead = async () => {
+  try {
+    await markNotificationsRead('all')
+    unreadCount.value = 0
+    notifications.value.forEach(n => { n.is_read = true })
+  } catch (e) {
+    console.error('Failed to mark notifications as read', e)
+  }
+}
+
+const handleMarkSingleRead = async (notif) => {
+  if (notif.is_read) return
+  try {
+    await markNotificationsRead(notif.id)
+    notif.is_read = true
+    unreadCount.value = Math.max(0, unreadCount.value - 1)
+  } catch (e) {
+    console.error('Failed to mark notification as read', e)
+  }
+}
+
+const formatTime = (ts) => {
+  if (!ts) return ''
+  try {
+    const date = new Date(ts)
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    })
+  } catch (e) {
+    return ts
+  }
+}
 
 const fetchAnnouncement = async () => {
   try {
@@ -153,6 +281,15 @@ onMounted(() => {
   }
 
   fetchAnnouncement()
+  fetchNotifications()
+  pollIntervalId = setInterval(fetchNotifications, 20000)
+})
+
+onUnmounted(() => {
+  if (pollIntervalId) {
+    clearInterval(pollIntervalId)
+    pollIntervalId = null
+  }
 })
 
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
