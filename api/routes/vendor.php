@@ -2843,7 +2843,7 @@ function handleGetBatches($pdo)
 
     if ($menuItemId) {
         $stmt = $pdo->prepare("
-            SELECT b.*, m.name as dish_name
+            SELECT b.*, m.name as dish_name, m.reheatable, m.reheat_hours, m.hold_hours
             FROM batches b
             JOIN menu_items m ON b.menu_item_id = m.id
             WHERE m.store_id = ? AND b.menu_item_id = ? AND b.state != 'discarded'
@@ -2852,7 +2852,7 @@ function handleGetBatches($pdo)
         $stmt->execute([$store_id, $menuItemId]);
     } else {
         $stmt = $pdo->prepare("
-            SELECT b.*, m.name as dish_name
+            SELECT b.*, m.name as dish_name, m.reheatable, m.reheat_hours, m.hold_hours
             FROM batches b
             JOIN menu_items m ON b.menu_item_id = m.id
             WHERE m.store_id = ? AND b.state != 'discarded'

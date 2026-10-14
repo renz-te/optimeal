@@ -6,6 +6,13 @@
         <p class="text-slate-500 font-medium mt-1">Select dishes from the master catalog, set stock and pricing, and publish today's menu.</p>
       </div>
       <div class="flex items-center gap-3">
+        <button 
+          @click="openReheatStationModal" 
+          class="flex items-center space-x-2 bg-amber-50 text-amber-800 border border-amber-300 px-4 py-2.5 rounded-lg font-bold hover:bg-amber-100 transition-colors shadow-xs"
+        >
+          <Flame :size="18" class="text-amber-600" />
+          <span>Reheat Station ({{ carriedBatches.length }})</span>
+        </button>
         <button @click="openPrepListModal" class="flex items-center space-x-2 bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-lg font-bold hover:bg-emerald-100 transition-colors">
           <ClipboardList :size="18" />
           <span>Prep Plan ({{ prepPlanData.prep_list?.length || 0 }})</span>
@@ -70,7 +77,17 @@
                 <input type="checkbox" v-model="item.selected" class="w-5 h-5 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer">
               </td>
               <td class="px-6 py-4">
-                <div class="font-bold text-slate-900">{{ item.name }}</div>
+                <div class="flex items-center justify-between gap-3">
+                  <div class="font-bold text-slate-900">{{ item.name }}</div>
+                  <button 
+                    @click.stop="openAddFreshModal(item)" 
+                    type="button" 
+                    title="Add a new fresh batch"
+                    class="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shrink-0"
+                  >
+                    <Plus :size="13" /> Add Fresh Batch
+                  </button>
+                </div>
                 <div class="text-[11px] text-slate-500 truncate max-w-[200px]" :title="item.ingredients.join(', ')">{{ item.ingredients.join(', ') }}</div>
 
                 <!-- Active Reservations & Compact Slot Summary (R2) -->
@@ -87,6 +104,44 @@
                   <div v-if="(item.reserved_qty || 0) > (item.stock || 0)" class="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 flex items-center gap-1.5">
                     <AlertTriangle class="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
                     <span>Reservations exceed plan: cooking {{ item.reserved_qty }} servings</span>
+                  </div>
+                </div>
+
+                <!-- Nested Active Batches List (Phase B4.9) -->
+                <div v-if="item.batches && item.batches.length > 0" class="mt-3 pt-2 border-t border-slate-100 space-y-1.5">
+                  <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                    <span>Active Batches ({{ item.batches.length }})</span>
+                    <span class="text-[10px] font-medium text-slate-400">Total remaining: {{ item.batches.reduce((sum, b) => sum + Number(b.remaining_stock), 0) }}</span>
+                  </div>
+                  <div 
+                    v-for="b in item.batches" 
+                    :key="b.id" 
+                    class="flex items-center justify-between text-xs bg-slate-50 border border-slate-200/80 rounded-lg px-2.5 py-1.5 gap-2"
+                  >
+                    <div class="flex items-center gap-2">
+                      <span 
+                        class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wide"
+                        :class="b.state === 'fresh' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'"
+                      >
+                        {{ b.state === 'fresh' ? 'Fresh' : 'Reheated' }}
+                      </span>
+                      <span class="text-[11px] font-medium text-slate-600">
+                        {{ b.state === 'fresh' ? 'Cooked: ' + formatBatchTime(b.cooked_at) : 'Reheated: ' + formatBatchTime(b.reheated_at) }}
+                      </span>
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                      <span 
+                        class="text-[11px] font-semibold flex items-center gap-1"
+                        :class="getSafeTimeInfo(b.sell_by).isExpired ? 'text-rose-600 font-bold' : 'text-slate-600'"
+                      >
+                        <Clock :size="12" class="text-slate-400" />
+                        {{ getSafeTimeInfo(b.sell_by).label }}
+                      </span>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-white text-slate-800 border border-slate-200">
+                        {{ b.remaining_stock }} / {{ b.total_stock }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </td>
@@ -791,12 +846,193 @@
         {{ toast.message }}
       </div>
     </transition>
+    <!-- Add Fresh Batch Modal -->
+    <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="showAddFreshModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" @click="closeAddFreshModal">
+        <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-100" @click.stop>
+          <div class="p-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                <Plus :size="18" />
+              </div>
+              <div>
+                <h3 class="text-lg font-black text-slate-900">Add Fresh Batch</h3>
+                <p class="text-xs text-slate-500">{{ freshBatchDish?.name }}</p>
+              </div>
+            </div>
+            <button @click="closeAddFreshModal" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100">
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4">
+            <div class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-900 space-y-1">
+              <div class="font-bold flex items-center gap-1.5">
+                <Shield :size="14" class="text-emerald-600" />
+                Food Safety Parameters
+              </div>
+              <p class="text-[11px] text-emerald-800 leading-relaxed">
+                Fresh batches have a safe holding window of {{ freshBatchDish?.hold_hours || 6 }} hours. Time-based dynamic pricing decay will activate automatically as sell-by cutoff approaches.
+              </p>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">
+                Servings / Quantity
+              </label>
+              <input 
+                type="number" 
+                v-model.number="freshBatchQty" 
+                min="1" 
+                max="500" 
+                class="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-lg outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+          </div>
+
+          <div class="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+            <button 
+              type="button" 
+              @click="closeAddFreshModal" 
+              class="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              @click="submitFreshBatch" 
+              :disabled="isSubmittingBatch || freshBatchQty <= 0" 
+              class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md disabled:opacity-50 flex items-center gap-1.5 transition-all"
+            >
+              <Loader2 v-if="isSubmittingBatch" :size="14" class="animate-spin" />
+              <span>Confirm & Add Batch</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Carried-Over Stock / Reheat Station Modal -->
+    <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="showReheatModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" @click="closeReheatStationModal">
+        <div class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-100 max-h-[90vh] flex flex-col" @click.stop>
+          <div class="p-6 bg-amber-50/80 border-b border-amber-200 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-amber-200 text-amber-800 flex items-center justify-center font-bold">
+                <Flame :size="20" />
+              </div>
+              <div>
+                <h3 class="text-xl font-black text-slate-900">Carried-Over Stock & Reheat Station</h3>
+                <p class="text-xs text-amber-900 font-medium">Reheat carried stock for today with safe 3h hold & automatic 50% discount</p>
+              </div>
+            </div>
+            <button @click="closeReheatStationModal" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-white/60">
+              <X :size="20" />
+            </button>
+          </div>
+
+          <div class="p-6 overflow-y-auto flex-1 space-y-4">
+            <div v-if="carriedBatches.length === 0" class="text-center py-12 text-slate-400">
+              <Flame :size="40" class="mx-auto mb-2 opacity-30 text-amber-600" />
+              <p class="text-sm font-semibold text-slate-600">No carried-over stock available</p>
+              <p class="text-xs text-slate-400 mt-1">Dishes saved overnight in cold storage will show up here.</p>
+            </div>
+
+            <div v-for="cb in carriedBatches" :key="cb.id" class="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-4">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <h4 class="font-bold text-slate-900 text-sm truncate">{{ cb.dish_name }}</h4>
+                  <span 
+                    v-if="cb.reheatable !== 0 && cb.reheatable !== false" 
+                    class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  >
+                    Reheatable
+                  </span>
+                  <span 
+                    v-else 
+                    class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300"
+                  >
+                    Non-Reheatable
+                  </span>
+                </div>
+                <div class="text-xs text-slate-500 mt-1 flex items-center gap-3">
+                  <span>Batch #{{ cb.id }}</span>
+                  <span>•</span>
+                  <span>Carried Stock: <strong class="text-slate-800">{{ cb.remaining_stock }}</strong> servings</span>
+                  <span>•</span>
+                  <span>Reheat window: <strong class="text-slate-800">{{ cb.reheat_hours || 3 }}h</strong></span>
+                </div>
+              </div>
+
+              <div>
+                <button 
+                  v-if="cb.reheatable !== 0 && cb.reheatable !== false" 
+                  @click="openReheatForm(cb)"
+                  type="button" 
+                  class="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors"
+                >
+                  <Flame :size="14" />
+                  <span>Reheat</span>
+                </button>
+                <span v-else class="text-xs font-bold text-slate-400 italic">
+                  Cannot Reheat
+                </span>
+              </div>
+            </div>
+
+            <!-- Inline / Sub-Modal Reheat Confirmation Form -->
+            <div v-if="selectedBatchForReheat" class="p-5 bg-amber-50/60 border-2 border-amber-300 rounded-xl space-y-3 mt-4">
+              <div class="flex items-center justify-between">
+                <h5 class="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                  <Flame :size="16" class="text-amber-600" />
+                  Reheat Batch: {{ selectedBatchForReheat.dish_name }}
+                </h5>
+                <button @click="selectedBatchForReheat = null" class="text-slate-400 hover:text-slate-600">
+                  <X :size="16" />
+                </button>
+              </div>
+
+              <div class="text-xs text-slate-600">
+                Available carried stock: <strong>{{ selectedBatchForReheat.remaining_stock }}</strong> portions.
+                Reheated dishes will receive a <strong>{{ selectedBatchForReheat.reheat_hours || 3 }} hour</strong> safe consumption window and be presented to customers at <strong>50% OFF</strong>.
+              </div>
+
+              <div class="flex items-center gap-3 pt-1">
+                <label class="text-xs font-bold text-slate-700">Portions to Reheat:</label>
+                <input 
+                  type="number" 
+                  v-model.number="reheatQty" 
+                  min="1" 
+                  :max="selectedBatchForReheat.remaining_stock" 
+                  class="w-24 px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-slate-900 text-sm outline-none focus:border-amber-500"
+                />
+                <button 
+                  type="button" 
+                  @click="submitReheatBatch" 
+                  :disabled="isSubmittingReheat || reheatQty <= 0 || reheatQty > selectedBatchForReheat.remaining_stock" 
+                  class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm disabled:opacity-50 flex items-center gap-1 transition-colors"
+                >
+                  <Loader2 v-if="isSubmittingReheat" :size="12" class="animate-spin" />
+                  <span>Confirm Reheat</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+            <button @click="closeReheatStationModal" class="px-5 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg hover:bg-slate-800 transition-colors">
+              Close Station
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, reactive, watch, computed } from 'vue'
-import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2, Camera, UploadCloud } from 'lucide-vue-next'
+import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2, Camera, UploadCloud, Flame, Clock } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useCatalog } from '../../stores/dishCatalog'
 import { useSandbox } from '../../stores/sandbox'
@@ -812,6 +1048,22 @@ const showCustomModal = ref(false)
 const editItem = ref(null)
 const newCustomAllergen = ref('')
 const launchState = ref('idle')
+
+// Phase B4.9 Batch Engine & Reheat Station State
+const allVendorBatches = ref([])
+const showAddFreshModal = ref(false)
+const freshBatchDish = ref(null)
+const freshBatchQty = ref(15)
+const isSubmittingBatch = ref(false)
+
+const showReheatModal = ref(false)
+const selectedBatchForReheat = ref(null)
+const reheatQty = ref(5)
+const isSubmittingReheat = ref(false)
+
+const carriedBatches = computed(() => {
+  return allVendorBatches.value.filter(b => b.state === 'carried' && Number(b.remaining_stock) > 0)
+})
 
 // Phase D2: Recipe & Kitchen Prep State
 const batchPlannedServings = ref(30)
@@ -1021,6 +1273,133 @@ const enrichDish = async () => {
   }
 }
 
+const fetchBatches = async () => {
+  try {
+    const res = await fetch('/api/vendor/batches')
+    if (res.ok) {
+      allVendorBatches.value = await res.json()
+    }
+  } catch (err) {
+    console.error('Failed to load vendor batches:', err)
+  }
+}
+
+const openAddFreshModal = (dish) => {
+  freshBatchDish.value = dish
+  freshBatchQty.value = 15
+  showAddFreshModal.value = true
+}
+
+const closeAddFreshModal = () => {
+  showAddFreshModal.value = false
+  freshBatchDish.value = null
+}
+
+const submitFreshBatch = async () => {
+  if (!freshBatchDish.value || freshBatchQty.value <= 0) return
+  isSubmittingBatch.value = true
+  try {
+    const res = await fetch('/api/vendor/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        menu_item_id: freshBatchDish.value.id,
+        state: 'fresh',
+        quantity: freshBatchQty.value
+      })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      showToast(data.error || 'Failed to add fresh batch', 'error')
+      return
+    }
+    showToast('Fresh batch added successfully!', 'success')
+    closeAddFreshModal()
+    await Promise.all([fetchVendorCatalog(), fetchBatches()])
+  } catch (err) {
+    showToast('Network error while adding fresh batch', 'error')
+  } finally {
+    isSubmittingBatch.value = false
+  }
+}
+
+const openReheatStationModal = () => {
+  selectedBatchForReheat.value = null
+  showReheatModal.value = true
+  fetchBatches()
+}
+
+const closeReheatStationModal = () => {
+  showReheatModal.value = false
+  selectedBatchForReheat.value = null
+}
+
+const openReheatForm = (batch) => {
+  selectedBatchForReheat.value = batch
+  reheatQty.value = Math.min(Number(batch.remaining_stock), 10)
+}
+
+const submitReheatBatch = async () => {
+  if (!selectedBatchForReheat.value || reheatQty.value <= 0) return
+  isSubmittingReheat.value = true
+  try {
+    const res = await fetch('/api/vendor/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        menu_item_id: selectedBatchForReheat.value.menu_item_id,
+        parent_batch_id: selectedBatchForReheat.value.id,
+        state: 'reheated',
+        quantity: reheatQty.value
+      })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      showToast(data.error || 'Failed to reheat batch', 'error')
+      return
+    }
+    showToast('Reheated batch created successfully with 50% discount active!', 'success')
+    selectedBatchForReheat.value = null
+    await Promise.all([fetchVendorCatalog(), fetchBatches()])
+  } catch (err) {
+    showToast('Network error while reheating batch', 'error')
+  } finally {
+    isSubmittingReheat.value = false
+  }
+}
+
+const formatBatchTime = (datetimeStr) => {
+  if (!datetimeStr) return 'N/A'
+  try {
+    const d = new Date(datetimeStr.replace(' ', 'T'))
+    if (isNaN(d.getTime())) return datetimeStr
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
+  } catch (e) {
+    return datetimeStr
+  }
+}
+
+const getSafeTimeInfo = (sellByStr) => {
+  if (!sellByStr) return { isExpired: false, label: 'Safe' }
+  try {
+    const sellByDate = new Date(sellByStr.replace(' ', 'T'))
+    const now = new Date()
+    const diff = sellByDate.getTime() - now.getTime()
+    if (diff <= 0) {
+      return { isExpired: true, label: 'Expired' }
+    }
+    const totalMinutes = Math.floor(diff / 60000)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    if (hours > 0) {
+      return { isExpired: false, label: `${hours}h ${minutes}m safe` }
+    }
+    return { isExpired: false, label: `${minutes}m safe` }
+  } catch (e) {
+    return { isExpired: false, label: 'Safe' }
+  }
+}
+
 const fetchVendorCatalog = async () => {
   try {
     const res = await fetch('/api/vendor/menu')
@@ -1043,7 +1422,8 @@ const initRoster = () => {
       current_price: dish.current_price !== undefined ? dish.current_price : dish.base_price,
       reserved_qty: Number(dish.reserved_qty) || 0,
       pickup_slots: dish.pickup_slots || [],
-      slots_summary: dish.slots_summary || ''
+      slots_summary: dish.slots_summary || '',
+      batches: dish.batches || []
     }
   })
   fetchPrepPlan()
@@ -1051,6 +1431,7 @@ const initRoster = () => {
 
 onMounted(() => {
   fetchVendorCatalog()
+  fetchBatches()
 })
 
 watch(masterCatalog, () => {

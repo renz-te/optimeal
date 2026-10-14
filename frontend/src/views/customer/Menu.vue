@@ -69,7 +69,7 @@
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <template v-for="(item, idx) in displayDishes" :key="item.id">
+      <template v-for="(item, idx) in displayDishes" :key="item.cart_id">
         <!-- Visual Divider before first critical item -->
         <div v-if="idx === firstCriticalIndex" 
              class="col-span-full my-4 flex items-center justify-center gap-4">
@@ -128,14 +128,42 @@
               </span>
             </div>
 
-            <div v-if="isClearance(item)" class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center">
+            <div v-if="item.batch_type === 'reheated'" class="absolute top-3 right-3 bg-amber-600 text-white text-xs font-black px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1 border border-amber-400">
+              <Clock :size="14" />
+              50% OFF (Reheated)
+            </div>
+            <div v-else-if="isClearance(item)" class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center">
               <Clock :size="14" class="mr-1" />
               {{ calculateDiscountPercent(item) }}% OFF (Surplus Decay)
             </div>
           </div>
 
           <div class="p-5 flex-1 flex flex-col">
-            <h3 class="text-lg font-semibold text-slate-900 mb-1">{{ item.name }}</h3>
+            <div class="flex items-start justify-between gap-2 mb-1">
+              <h3 class="text-lg font-semibold text-slate-900 leading-snug">{{ item.name }}</h3>
+              <span 
+                v-if="item.batch_type === 'reheated'" 
+                class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-black bg-amber-100 text-amber-900 border border-amber-300 shrink-0"
+              >
+                50% OFF (Reheated)
+              </span>
+            </div>
+
+            <!-- Fresh / Reheated Subtitle Badge -->
+            <div class="mb-2">
+              <span 
+                v-if="item.batch_type === 'reheated'" 
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-300"
+              >
+                <Clock :size="12" class="text-amber-600" /> Reheated at {{ formatTimeDisplay(item.cooked_at) }}
+              </span>
+              <span 
+                v-else-if="item.batch_type === 'fresh' && item.cooked_at" 
+                class="text-xs font-medium text-emerald-700 flex items-center gap-1"
+              >
+                <Clock :size="12" class="text-emerald-600" /> Cooked today at {{ formatTimeDisplay(item.cooked_at) }}
+              </span>
+            </div>
             <p class="text-sm text-slate-600 mb-3">{{ item.description }}</p>
             
             <div v-if="item.macros && item.macros.calories" class="mb-2">
@@ -221,13 +249,27 @@
           </button>
           <div class="pr-12">
             <h3 class="text-2xl font-black mb-2 text-slate-900">{{ selectedItem.name }}</h3>
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+              <span 
+                v-if="selectedItem.batch_type === 'reheated'" 
+                class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 text-amber-900 border border-amber-300"
+              >
+                <Clock :size="12" /> Reheated at {{ formatTimeDisplay(selectedItem.cooked_at) }} • 50% OFF
+              </span>
+              <span 
+                v-else-if="selectedItem.batch_type === 'fresh' && selectedItem.cooked_at" 
+                class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+              >
+                <Clock :size="12" /> Cooked today at {{ formatTimeDisplay(selectedItem.cooked_at) }}
+              </span>
+              <div v-if="selectedItem.stock > 0" class="inline-block bg-slate-100 px-3 py-1 rounded-full text-xs font-bold text-slate-700 shadow-sm border border-slate-200">
+                Stock: {{ selectedItem.stock }} left
+              </div>
+              <div v-else class="inline-block bg-slate-100 px-3 py-1 rounded-full text-xs font-bold text-slate-500 shadow-sm border border-slate-200">
+                Out of Stock
+              </div>
+            </div>
             <p class="text-sm text-slate-600 mb-4 leading-relaxed">{{ selectedItem.description }}</p>
-            <div v-if="selectedItem.stock > 0" class="inline-block bg-slate-100 px-3 py-1.5 rounded-full text-xs font-bold text-slate-700 shadow-sm border border-slate-200">
-              Stock: {{ selectedItem.stock }} left
-            </div>
-            <div v-else class="inline-block bg-slate-100 px-3 py-1.5 rounded-full text-xs font-bold text-slate-500 shadow-sm border border-slate-200">
-              Out of Stock
-            </div>
           </div>
         </div>
 
@@ -545,7 +587,21 @@
           
           <div v-for="(c, i) in cart" :key="i" class="flex justify-between items-start mb-6 border-b border-slate-100 pb-6 last:border-0 last:pb-0">
             <div class="flex-1 pr-4">
-              <h4 class="font-bold text-slate-900 leading-tight">{{ c.item.name }}</h4>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h4 class="font-bold text-slate-900 leading-tight">{{ c.item.name }}</h4>
+                <span 
+                  v-if="c.item.batch_type === 'reheated'" 
+                  class="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300"
+                >
+                  Reheated (50% OFF)
+                </span>
+                <span 
+                  v-else-if="c.item.batch_type === 'fresh'" 
+                  class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+                >
+                  Fresh
+                </span>
+              </div>
               <div v-for="matchedFlag in getMatches(c.item)" :key="'cart-flag-'+matchedFlag" class="mt-1 flex items-center gap-1 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded w-fit">
                 <AlertTriangle :size="12" /> 
                 <template v-if="matchedFlag.startsWith('Watchlist:')">
@@ -561,14 +617,14 @@
             </div>
             
             <div class="flex flex-col items-end">
-              <div v-if="limitWarning && isClearance(c.item) && getCartItemTotalQty(c.item.id) >= 3" class="flex items-center gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium transition-all mb-2 w-full max-w-[200px]">
+              <div v-if="limitWarning && isClearance(c.item) && getCartItemTotalQty(c.item.cart_id || c.item.id) >= 3" class="flex items-center gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium transition-all mb-2 w-full max-w-[200px]">
                 <AlertTriangle :size="14" class="text-amber-600 shrink-0"/>
                 <span>{{ limitWarning }}</span>
               </div>
               <div class="flex items-center space-x-3 bg-slate-50 border border-slate-200 p-1 rounded-lg mb-2" @click.capture="handleCartIncrementAttempt(c)">
                 <button @click="c.quantity > 1 ? c.quantity-- : removeFromCart(i)" class="w-8 h-8 rounded bg-white shadow-sm border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors"><Minus :size="14" /></button>
                 <span class="w-6 text-center font-semibold tabular-nums text-sm">{{ c.quantity }}</span>
-                <button @click="getCartItemTotalQty(c.item.id) < 3 || !isClearance(c.item) ? c.quantity++ : null" class="w-8 h-8 rounded bg-white shadow-sm border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50" :disabled="isClearance(c.item) && getCartItemTotalQty(c.item.id) >= 3"><Plus :size="14" /></button>
+                <button @click="getCartItemTotalQty(c.item.cart_id || c.item.id) < 3 || !isClearance(c.item) ? c.quantity++ : null" class="w-8 h-8 rounded bg-white shadow-sm border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50" :disabled="isClearance(c.item) && getCartItemTotalQty(c.item.cart_id || c.item.id) >= 3"><Plus :size="14" /></button>
               </div>
               <button @click="removeFromCart(i)" class="text-[10px] font-bold text-rose-600 hover:underline uppercase tracking-wider">Remove</button>
             </div>
@@ -961,6 +1017,17 @@ const getImageUrl = (url) => {
   return '/' + url
 }
 
+const formatTimeDisplay = (datetimeStr) => {
+  if (!datetimeStr) return ''
+  try {
+    const d = new Date(datetimeStr.replace(' ', 'T'))
+    if (isNaN(d.getTime())) return datetimeStr
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
+  } catch (e) {
+    return datetimeStr
+  }
+}
+
 const localMenuItems = ref([])
 const menuItems = computed(() => {
   if (isAdmin.value && activePreviewMode.value === 'customer') {
@@ -1135,8 +1202,9 @@ const handleItemDrawerIncrementAttempt = (e) => {
 }
 
 const handleCartIncrementAttempt = (c) => {
+  const itemKey = c.item.cart_id || c.item.id
   // Check if click was on the [+] button (we can infer it if they are already at the max cap for clearance)
-  if (isClearance(c.item) && getCartItemTotalQty(c.item.id) >= 3) {
+  if (isClearance(c.item) && getCartItemTotalQty(itemKey) >= 3) {
     // If they click anywhere in the control while maxed out, just show the warning
     showWarning()
   }
@@ -1144,12 +1212,13 @@ const handleCartIncrementAttempt = (c) => {
 
 const reconcileCart = () => {
   if (!cart.value.length) return
-  const activeDishIds = new Set(menuItems.value.map(d => d.id))
+  const activeKeys = new Set(menuItems.value.map(d => d.cart_id || d.id))
   const evictedItems = new Set()
   const newCart = []
   
   cart.value.forEach(c => {
-    if (activeDishIds.has(c.item.id)) {
+    const key = c.item.cart_id || c.item.id
+    if (activeKeys.has(key) || c.item.is_side || (typeof key === 'number' && key >= 9900)) {
       newCart.push(c)
     } else {
       evictedItems.add(c.item.name)
@@ -1372,8 +1441,8 @@ const hasCartDietaryConflicts = computed(() => {
   return cart.value.some(c => getMatches(c.item).length > 0)
 })
 
-const getCartItemTotalQty = (itemId) => {
-  return cart.value.filter(c => c.item.id === itemId).reduce((sum, c) => sum + c.quantity, 0)
+const getCartItemTotalQty = (targetId) => {
+  return cart.value.filter(c => (c.item.cart_id || c.item.id) === targetId).reduce((sum, c) => sum + c.quantity, 0)
 }
 
 const clearanceSavings = computed(() => {
@@ -1666,8 +1735,9 @@ const availableSides = computed(() => {
 })
 
 const addSideToPlate = (sideItem) => {
+  const itemKey = sideItem.cart_id || sideItem.id
   const existingIndex = cart.value.findIndex(
-    c => c.item.id === sideItem.id && c.preference === 'no_preference'
+    c => (c.item.cart_id || c.item.id) === itemKey && c.preference === 'no_preference'
   )
   if (existingIndex > -1) {
     cart.value[existingIndex].quantity += 1
@@ -1687,9 +1757,10 @@ const confirmAddToPlate = () => {
 
   let qtyToAdd = quantity.value
   let wasClamped = false
+  const itemKey = selectedItem.value.cart_id || selectedItem.value.id
   
   if (isClearance(selectedItem.value)) {
-    const existingQty = getCartItemTotalQty(selectedItem.value.id)
+    const existingQty = getCartItemTotalQty(itemKey)
       
     if (existingQty + qtyToAdd > 3) {
       qtyToAdd = Math.max(0, 3 - existingQty)
@@ -1705,7 +1776,7 @@ const confirmAddToPlate = () => {
   const isMain = isMainDish(itemAdded)
 
   const existingIndex = cart.value.findIndex(
-    c => c.item.id === selectedItem.value.id && c.preference === preference.value
+    c => (c.item.cart_id || c.item.id) === itemKey && c.preference === preference.value
   )
   
   if (existingIndex > -1) {
@@ -1791,7 +1862,8 @@ const confirmAddAllergenDish = () => {
   })
 
   // Add to cart
-  const existingIndex = cart.value.findIndex(c => c.item.id === itemToAdd.id)
+  const itemKey = itemToAdd.cart_id || itemToAdd.id
+  const existingIndex = cart.value.findIndex(c => (c.item.cart_id || c.item.id) === itemKey)
   if (existingIndex > -1) {
     cart.value[existingIndex].quantity += 1
   } else {
@@ -1804,7 +1876,7 @@ const confirmAddAllergenDish = () => {
 
   ttlSeconds.value = 1800
   closeAllergenWarningModal()
-  if (selectedItem.value && selectedItem.value.id === itemToAdd.id) {
+  if (selectedItem.value && (selectedItem.value.cart_id || selectedItem.value.id) === itemKey) {
     selectedItem.value = null
   }
   if (isMainDish(itemToAdd)) {
@@ -1882,7 +1954,9 @@ const processOrder = async (type) => {
         allergen_override: Boolean(allergenOverrideConsent.value),
         overridden_allergen_ids: overriddenAllergenIds.value,
         items: cart.value.map(c => ({
-          menu_item_id: c.item.id,
+          menu_item_id: c.item.original_dish_id || c.item.id,
+          cart_id: c.item.cart_id || (c.item.id + '_' + (c.item.batch_type || 'fresh')),
+          batch_type: c.item.batch_type || 'fresh',
           quantity: c.quantity,
           portion_preference: c.preference,
           ack: true
