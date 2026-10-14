@@ -81,13 +81,83 @@
             </div>
           </div>
 
-          <div class="flex items-center space-x-3 bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
-            <User :size="18" class="text-slate-500" />
-            <router-link to="/customer/settings" class="text-sm font-semibold text-slate-700 hover:text-emerald-600 transition-colors cursor-pointer">
-              {{ user.name }}
-            </router-link>
-            <button v-if="user.role === 'admin'" @click="exitSandbox" class="text-xs bg-amber-500/20 text-amber-700 border border-amber-300 px-3 py-1 rounded font-semibold">Exit Sandbox</button>
-            <button v-else @click="logout" class="text-xs font-bold text-rose-600 hover:bg-rose-50 px-2 py-1 bg-white rounded-lg transition-colors">Logout</button>
+          <!-- User Avatar Dropdown -->
+          <div class="relative">
+            <button 
+              @click="isUserMenuOpen = !isUserMenuOpen; if (isUserMenuOpen) isDropdownOpen = false" 
+              class="flex items-center space-x-2 p-1 pl-1.5 pr-2.5 rounded-full hover:bg-slate-100 transition-colors focus:outline-none border border-slate-200/80 bg-white shadow-sm"
+              title="User menu"
+            >
+              <div class="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-xs shadow-sm ring-2 ring-emerald-500/20">
+                {{ userInitial }}
+              </div>
+              <span class="hidden sm:inline-block text-sm font-semibold text-slate-700 max-w-[120px] truncate">
+                {{ user.name }}
+              </span>
+              <ChevronDown :size="14" class="text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': isUserMenuOpen }" />
+            </button>
+
+            <!-- Backdrop to close on click outside -->
+            <div v-if="isUserMenuOpen" class="fixed inset-0 z-40" @click="isUserMenuOpen = false"></div>
+
+            <!-- Dropdown Menu -->
+            <transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="transform scale-95 opacity-0"
+              enter-to-class="transform scale-100 opacity-100"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="transform scale-100 opacity-100"
+              leave-to-class="transform scale-95 opacity-0"
+            >
+              <div 
+                v-if="isUserMenuOpen" 
+                class="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-sm overflow-hidden"
+              >
+                <div class="px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+                  <div class="font-bold text-slate-900 truncate">{{ user.name }}</div>
+                  <div class="text-[11px] text-slate-500 truncate mt-0.5">{{ user.email }}</div>
+                </div>
+
+                <div class="py-1">
+                  <router-link 
+                    to="/customer/settings" 
+                    @click="isUserMenuOpen = false" 
+                    class="flex items-center space-x-2.5 px-4 py-2 hover:bg-slate-50 text-slate-700 font-medium transition-colors"
+                  >
+                    <User :size="16" class="text-slate-400" />
+                    <span>My Profile</span>
+                  </router-link>
+
+                  <router-link 
+                    to="/customer/orders" 
+                    @click="isUserMenuOpen = false" 
+                    class="flex items-center space-x-2.5 px-4 py-2 hover:bg-slate-50 text-slate-700 font-medium transition-colors"
+                  >
+                    <Clock :size="16" class="text-slate-400" />
+                    <span>My Orders</span>
+                  </router-link>
+                </div>
+
+                <template v-if="user.role === 'admin'">
+                  <div class="border-t border-slate-100 my-1"></div>
+                  <button 
+                    @click="exitSandbox(); isUserMenuOpen = false" 
+                    class="w-full flex items-center space-x-2.5 px-4 py-2 text-amber-700 hover:bg-amber-50 font-semibold transition-colors text-left"
+                  >
+                    <span>Exit Sandbox</span>
+                  </button>
+                </template>
+
+                <div class="border-t border-slate-100 my-1"></div>
+                <button 
+                  @click="logout(); isUserMenuOpen = false" 
+                  class="w-full flex items-center space-x-2.5 px-4 py-2 text-rose-600 hover:bg-rose-50 font-bold transition-colors text-left"
+                >
+                  <LogOut :size="16" class="text-rose-500" />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </transition>
           </div>
         </template>
         <template v-else>
@@ -120,15 +190,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, ShoppingBag, Clock, Megaphone, X, Bell } from 'lucide-vue-next'
+import { User, ShoppingBag, Clock, Megaphone, X, Bell, ChevronDown, LogOut } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
 import { getNotifications, markNotificationsRead } from '../services/api'
 
 const { exitSandbox, clearSandbox } = useSandbox()
 const router = useRouter()
 const user = ref(null)
+const isUserMenuOpen = ref(false)
+
+const userInitial = computed(() => {
+  if (!user.value || !user.value.name) return 'U'
+  return user.value.name.charAt(0).toUpperCase()
+})
 
 const globalAnnouncement = ref('')
 const isAnnouncementDismissed = ref(false)

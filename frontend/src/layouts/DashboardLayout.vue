@@ -79,7 +79,7 @@
           <router-link to="/admin/dashboard" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <LayoutDashboard :size="18" /><span>Overview</span>
           </router-link>
-          <router-link v-if="role === 'admin'" to="/admin/users" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
+          <router-link to="/admin/users" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
             <Users :size="18" /><span>User Management</span>
           </router-link>
           <router-link to="/admin/taxonomy" class="flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors" active-class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-inner">
@@ -125,6 +125,108 @@
     
     <!-- Main Content -->
     <main class="flex-1 overflow-auto bg-slate-50 relative z-10 flex flex-col h-full">
+      <!-- Top Navigation Header -->
+      <header class="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between sticky top-0 z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-500">
+            {{ displayRole === 'admin' ? 'Admin Control Center' : 'Vendor Operations Portal' }}
+          </span>
+        </div>
+
+        <div class="flex items-center space-x-4">
+          <!-- Avatar Dropdown Toggle -->
+          <div class="relative">
+            <button 
+              @click="isUserMenuOpen = !isUserMenuOpen" 
+              class="flex items-center space-x-2 p-1 pl-1.5 pr-2.5 rounded-full hover:bg-slate-100 transition-colors focus:outline-none border border-slate-200/80 bg-white shadow-sm"
+              title="User menu"
+            >
+              <div class="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-xs shadow-sm ring-2 ring-emerald-500/20">
+                {{ userInitial }}
+              </div>
+              <span class="hidden sm:inline-block text-sm font-semibold text-slate-700 max-w-[140px] truncate">
+                {{ userName }}
+              </span>
+              <ChevronDown :size="14" class="text-slate-400 transition-transform duration-200" :class="{ 'rotate-180': isUserMenuOpen }" />
+            </button>
+
+            <!-- Backdrop to close on click outside -->
+            <div v-if="isUserMenuOpen" class="fixed inset-0 z-40" @click="isUserMenuOpen = false"></div>
+
+            <!-- Dropdown Menu -->
+            <transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="transform scale-95 opacity-0"
+              enter-to-class="transform scale-100 opacity-100"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="transform scale-100 opacity-100"
+              leave-to-class="transform scale-95 opacity-0"
+            >
+              <div 
+                v-if="isUserMenuOpen" 
+                class="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 text-sm overflow-hidden"
+              >
+                <div class="px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+                  <div class="font-bold text-slate-900 truncate">{{ userName }}</div>
+                  <div class="text-[11px] text-slate-500 truncate mt-0.5">{{ userEmail }}</div>
+                </div>
+
+                <div class="py-1">
+                  <!-- Vendor role links -->
+                  <template v-if="displayRole === 'vendor'">
+                    <router-link 
+                      to="/vendor/settings" 
+                      @click="isUserMenuOpen = false" 
+                      class="flex items-center space-x-2.5 px-4 py-2 hover:bg-slate-50 text-slate-700 font-medium transition-colors"
+                    >
+                      <Settings :size="16" class="text-slate-400" />
+                      <span>Settings</span>
+                    </router-link>
+                    <router-link 
+                      to="/vendor/orders" 
+                      @click="isUserMenuOpen = false" 
+                      class="flex items-center space-x-2.5 px-4 py-2 hover:bg-slate-50 text-slate-700 font-medium transition-colors"
+                    >
+                      <ListOrdered :size="16" class="text-slate-400" />
+                      <span>Live Orders</span>
+                    </router-link>
+                  </template>
+
+                  <!-- Admin role links -->
+                  <template v-else-if="displayRole === 'admin'">
+                    <router-link 
+                      to="/admin/dashboard" 
+                      @click="isUserMenuOpen = false" 
+                      class="flex items-center space-x-2.5 px-4 py-2 hover:bg-slate-50 text-slate-700 font-medium transition-colors"
+                    >
+                      <Settings :size="16" class="text-slate-400" />
+                      <span>Settings</span>
+                    </router-link>
+                    <router-link 
+                      to="/admin/users" 
+                      @click="isUserMenuOpen = false" 
+                      class="flex items-center space-x-2.5 px-4 py-2 hover:bg-slate-50 text-slate-700 font-medium transition-colors"
+                    >
+                      <Users :size="16" class="text-slate-400" />
+                      <span>User Management</span>
+                    </router-link>
+                  </template>
+                </div>
+
+                <div class="border-t border-slate-100 my-1"></div>
+                <button 
+                  @click="logout(); isUserMenuOpen = false" 
+                  class="w-full flex items-center space-x-2.5 px-4 py-2 text-rose-600 hover:bg-rose-50 font-bold transition-colors text-left"
+                >
+                  <LogOut :size="16" class="text-rose-500" />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </transition>
+          </div>
+        </div>
+      </header>
+
       <!-- Global Announcement Banner -->
       <div 
         v-if="globalAnnouncement && !isAnnouncementDismissed" 
@@ -164,7 +266,9 @@ import {
   LogOut,
   Megaphone,
   X,
-  Bell
+  Bell,
+  Settings,
+  ChevronDown
 } from 'lucide-vue-next'
 import { useSandbox } from '../stores/sandbox'
 import { getNotifications, markNotificationsRead } from '../services/api'
@@ -174,6 +278,7 @@ const { activePreviewMode, clearSandbox } = useSandbox()
 const role = ref('vendor')
 const userName = ref('')
 const userEmail = ref('')
+const isUserMenuOpen = ref(false)
 
 const globalAnnouncement = ref('')
 const isAnnouncementDismissed = ref(false)
