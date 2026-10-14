@@ -177,14 +177,35 @@ function handleGetMenu($pdo)
     $stmt = $pdo->prepare("
         SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url, m.ingredients_text,
                m.category, m.dietary, m.ai_confirmed, m.calories, m.protein_g, m.carbs_g, m.fat_g, m.sodium_mg,
-               i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
-               i.cooked_at, i.sell_by
+               m.hold_hours, m.refrigerated_hours, m.reheat_hours, m.reheatable,
+               b.id AS batch_id, b.state AS batch_state, b.cooked_at, b.reheated_at, b.sell_by,
+               b.remaining_stock, b.hold_hours AS batch_hold_hours, b.reheat_hours AS batch_reheat_hours
         FROM menu_items m
-        LEFT JOIN inventory i ON m.id = i.menu_item_id
-        WHERE m.store_id = ? AND m.is_active = 1 AND i.delisted_from_app = 0 AND i.online_pool_qty > 0
+        JOIN batches b ON m.id = b.menu_item_id
+        WHERE m.store_id = ? AND m.is_active = 1 AND b.remaining_stock > 0 AND b.state IN ('fresh', 'reheated')
+        ORDER BY m.id DESC, b.sell_by ASC
     ");
     $stmt->execute([$store_id]);
-    $items = $stmt->fetchAll();
+    $batchRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Group batches by dish ID and pool state ('fresh', 'reheated')
+    $dishes = [];
+    foreach ($batchRows as $row) {
+        $dishId = (int)$row['id'];
+        if (!isset($dishes[$dishId])) {
+            $dishes[$dishId] = [
+                'item' => $row,
+                'pools' => [
+                    'fresh' => [],
+                    'reheated' => []
+                ]
+            ];
+        }
+        $state = $row['batch_state'];
+        if (isset($dishes[$dishId]['pools'][$state])) {
+            $dishes[$dishId]['pools'][$state][] = $row;
+        }
+    }
 
     // Fetch logged-in user's dietary preferences (medical allergens and dietary boundaries)
     $userAllergens = [];
@@ -200,69 +221,53 @@ function handleGetMenu($pdo)
         }
     }
 
-    $now = time();
+    $nowTimestamp = time();
+    $closingTimeStr = PricingEngine::getEffectiveClosingTime($settings);
+    $todayClosingTimestamp = strtotime(date('Y-m-d ') . $closingTimeStr);
+
     $result = [];
-    foreach ($items as $item) {
-        // Explicitly filter out any dishes where online_pool_qty <= 0
-        if ((int)($item['online_pool_qty'] ?? 0) <= 0) {
-            continue;
-        }
+    foreach ($dishes as $dishId => $dishData) {
+        $item = $dishData['item'];
 
-        // Food Safety Check: If current time in Asia/Manila >= sell_by, item is spoiled
-        if (!empty($item['sell_by'])) {
-            $sellByTimestamp = strtotime($item['sell_by']);
-            if ($now >= $sellByTimestamp) {
-                // Item has expired its safe holding threshold: omit from menu
-                continue;
-            }
-        }
-        // 1. Unified dynamic pricing resolution using global settings tiers
-        $current_price = PricingEngine::calculateCurrentPrice(
-            $item['base_price'],
-            $item['price_floor'],
-            $settings
-        );
-
-        // 2. Fetch allergens & sensitivities
+        // 1. Fetch allergens & sensitivities
         $astmt = $pdo->prepare("
             SELECT ca.name 
             FROM menu_item_critical_allergens mca
             JOIN critical_allergens ca ON mca.allergen_id = ca.id
             WHERE mca.menu_item_id = ?
         ");
-        $astmt->execute([$item['id']]);
+        $astmt->execute([$dishId]);
         $critical_allergens = $astmt->fetchAll(PDO::FETCH_COLUMN);
 
         $sstmt = $pdo->prepare("
             SELECT ds.name 
-            FROM menu_item_digestive_sensitivities mds
-            JOIN digestive_sensitivities ds ON mds.sensitivity_id = ds.id
-            WHERE mds.menu_item_id = ?
+            FROM menu_item_digestive_sensitivities mids
+            JOIN digestive_sensitivities ds ON mids.sensitivity_id = ds.id
+            WHERE mids.menu_item_id = ?
         ");
-        $sstmt->execute([$item['id']]);
+        $sstmt->execute([$dishId]);
         $digestive_sensitivities = $sstmt->fetchAll(PDO::FETCH_COLUMN);
 
-        // 3. Fetch ingredients
+        // 2. Fetch ingredients
         $istmt = $pdo->prepare("
             SELECT i.name 
             FROM menu_item_ingredients mii
             JOIN ingredients i ON mii.ingredient_id = i.id
             WHERE mii.menu_item_id = ?
         ");
-        $istmt->execute([$item['id']]);
+        $istmt->execute([$dishId]);
         $ingredients = $istmt->fetchAll(PDO::FETCH_COLUMN);
 
-        // H1: Fetch unmapped ingredients from recipe_ingredients (where ingredient_id IS NULL)
+        // Fetch unmapped ingredients from recipe_ingredients (where ingredient_id IS NULL)
         $unmappedStmt = $pdo->prepare("
             SELECT ri.ingredient_name
             FROM recipe_ingredients ri
             JOIN recipes r ON ri.recipe_id = r.id
             WHERE r.menu_item_id = ? AND ri.ingredient_id IS NULL
         ");
-        $unmappedStmt->execute([$item['id']]);
+        $unmappedStmt->execute([$dishId]);
         $unmappedNames = $unmappedStmt->fetchAll(PDO::FETCH_COLUMN);
 
-        // Also check if ingredients_text has unmapped ingredients
         if (!empty($item['ingredients_text'])) {
             $textParts = array_filter(array_map('trim', explode(',', $item['ingredients_text'])));
             $checkIngStmt = $pdo->prepare("SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1");
@@ -302,14 +307,13 @@ function handleGetMenu($pdo)
             ];
         }
 
-        // Evaluate conflict_tier: critical, boundary, or safe
+        // Evaluate conflict_tier: critical, boundary, or safe (B4.4 logic)
         $hasCriticalConflict = false;
         if (!empty($userAllergens)) {
             foreach ($userAllergens as $ua) {
                 $normUa = strtolower(trim($ua));
                 if ($normUa === '') continue;
 
-                // Match against dish mapped critical allergens
                 foreach ($critical_allergens as $ca) {
                     $normCa = strtolower(trim($ca));
                     if ($normCa === $normUa || strpos($normCa, $normUa) !== false || strpos($normUa, $normCa) !== false) {
@@ -318,7 +322,6 @@ function handleGetMenu($pdo)
                     }
                 }
 
-                // Match against dish ingredients
                 foreach ($ingredients as $ing) {
                     $normIng = strtolower(trim($ing));
                     if (strpos($normIng, $normUa) !== false) {
@@ -408,27 +411,95 @@ function handleGetMenu($pdo)
             $conflictTier = 'safe';
         }
 
-        $result[] = [
-            'id' => $item['id'],
-            'name' => $item['name'],
-            'description' => $item['description'],
-            'category' => $item['category'] ?? 'Uncategorized',
-            'dietary' => $dietary,
-            'current_price' => round($current_price, 2),
-            'base_price' => $item['base_price'],
-            'stock' => $item['online_pool_qty'], // For frontend UI
-            'online_pool_qty' => $item['online_pool_qty'], // Backwards compatibility
-            'cooked_at' => $item['cooked_at'] ?? null,
-            'sell_by' => $item['sell_by'] ?? null,
-            'ingredients' => $ingredients,
-            'allergens' => $critical_allergens,
-            'critical_allergens' => $critical_allergens,
-            'sensitivities' => $digestive_sensitivities,
-            'digestive_sensitivities' => $digestive_sensitivities,
-            'macros' => $macros,
-            'has_critical' => count($critical_allergens) > 0 ? 1 : 0,
-            'conflict_tier' => $conflictTier
-        ];
+        // 3. Process each pool: 'fresh' and 'reheated'
+        foreach (['fresh', 'reheated'] as $pool_state) {
+            if (empty($dishData['pools'][$pool_state])) {
+                continue;
+            }
+
+            $poolBatches = $dishData['pools'][$pool_state];
+
+            // Sum remaining_stock in this pool
+            $availableQty = 0;
+            foreach ($poolBatches as $pb) {
+                $availableQty += (int)$pb['remaining_stock'];
+            }
+            if ($availableQty <= 0) {
+                continue;
+            }
+
+            // Earliest sell_by (FIFO)
+            $earliestBatch = $poolBatches[0];
+            $earliestSellBy = $earliestBatch['sell_by'];
+            $earliestCookedAt = ($pool_state === 'reheated')
+                ? ($earliestBatch['reheated_at'] ?? $earliestBatch['cooked_at'])
+                : $earliestBatch['cooked_at'];
+
+            // Effective cutoff = min(sell_by, settings.closing_time)
+            $sellByTimestamp = !empty($earliestSellBy) ? strtotime($earliestSellBy) : $todayClosingTimestamp;
+            $effectiveCutoff = min($sellByTimestamp, $todayClosingTimestamp);
+
+            if ($nowTimestamp > $effectiveCutoff) {
+                continue; // Food safety expiration or closing cutoff passed
+            }
+
+            // 4. Time-Based Pricing Engine
+            $basePrice = (float)$item['base_price'];
+            $discountPercent = 0.0;
+
+            if ($pool_state === 'reheated') {
+                // Flat 50% discount for reheated
+                $discountPercent = 50.0;
+            } else {
+                // Fresh: percentage of time left = (sell_by - NOW) / hold_hours
+                $holdHours = (int)($item['hold_hours'] ?? ($earliestBatch['batch_hold_hours'] ?? 6));
+                $holdSeconds = max(1, $holdHours * 3600);
+                $timeLeftSeconds = max(0, $sellByTimestamp - $nowTimestamp);
+                $timeRatio = $timeLeftSeconds / $holdSeconds;
+
+                if ($timeRatio > 0.50) {
+                    $discountPercent = 0.0;
+                } elseif ($timeRatio > 0.25) {
+                    $discountPercent = 25.0;
+                } else {
+                    $discountPercent = 40.0;
+                }
+            }
+
+            $discountedPrice = round($basePrice * (1.0 - ($discountPercent / 100.0)), 2);
+
+            $cartId = $item['id'] . '_' . $pool_state;
+
+            $result[] = [
+                'id' => $cartId,
+                'cart_id' => $cartId,
+                'original_dish_id' => (int)$item['id'],
+                'menu_item_id' => (int)$item['id'],
+                'batch_type' => $pool_state,
+                'name' => $item['name'],
+                'description' => $item['description'],
+                'category' => $item['category'] ?? 'Uncategorized',
+                'dietary' => $dietary,
+                'price' => $basePrice,
+                'base_price' => $basePrice,
+                'discounted_price' => $discountedPrice,
+                'current_price' => $discountedPrice,
+                'discount_percent' => $discountPercent,
+                'available_qty' => $availableQty,
+                'stock' => $availableQty,
+                'online_pool_qty' => $availableQty,
+                'cooked_at' => $earliestCookedAt,
+                'sell_by' => $earliestSellBy,
+                'ingredients' => $ingredients,
+                'allergens' => $critical_allergens,
+                'critical_allergens' => $critical_allergens,
+                'sensitivities' => $digestive_sensitivities,
+                'digestive_sensitivities' => $digestive_sensitivities,
+                'macros' => $macros,
+                'has_critical' => count($critical_allergens) > 0 ? 1 : 0,
+                'conflict_tier' => $conflictTier
+            ];
+        }
     }
 
     // 3. Sort items: critical conflicts/allergens to the bottom
@@ -456,10 +527,12 @@ function handleGetMenu($pdo)
     ]);
 }
 
-function handleCreateReservation($pdo)
+function handleCreateReservation($pdo, $input = null)
 {
     $user_id = requireCustomer($pdo);
-    $input = json_decode(file_get_contents('php://input'), true);
+    if ($input === null) {
+        $input = json_decode(file_get_contents('php://input'), true);
+    }
 
     // Expects: { "items": [ {"menu_item_id": 1, "quantity": 1, "portion_preference": "lean_meat", "ack": true} ] }
     if (!isset($input['items']) || !is_array($input['items'])) {
@@ -638,39 +711,60 @@ function handleCreateReservation($pdo)
         }
     }
 
-    // Pre-flight Checkout Defense: explicitly verify that online_pool_qty >= quantity for every item in the cart BEFORE creating the order
+    // Pre-flight Checkout Defense: explicitly verify that batches remaining_stock >= quantity for every item & batch_type in the cart BEFORE creating the order
     $cartTotals = [];
     foreach ($input['items'] as $item) {
-        $itemId = (int)($item['menu_item_id'] ?? 0);
+        $rawId = $item['menu_item_id'] ?? ($item['original_dish_id'] ?? 0);
+        $itemId = (int)explode('_', (string)$rawId)[0];
+        $bType = (!empty($item['batch_type']) && in_array($item['batch_type'], ['fresh', 'reheated'], true))
+            ? $item['batch_type']
+            : ((is_string($rawId) && strpos($rawId, 'reheated') !== false) ? 'reheated' : 'fresh');
+
         $qty = (int)($item['quantity'] ?? 0);
         if ($itemId <= 0 || $qty <= 0) {
             jsonResponse(['error' => 'Invalid item or quantity in reservation request.'], 400);
         }
-        $cartTotals[$itemId] = ($cartTotals[$itemId] ?? 0) + $qty;
+        $key = $itemId . '_' . $bType;
+        if (!isset($cartTotals[$key])) {
+            $cartTotals[$key] = [
+                'menu_item_id' => $itemId,
+                'batch_type' => $bType,
+                'quantity' => 0
+            ];
+        }
+        $cartTotals[$key]['quantity'] += $qty;
     }
 
-    foreach ($cartTotals as $itemId => $requiredQty) {
+    foreach ($cartTotals as $key => $cartReq) {
+        $itemId = $cartReq['menu_item_id'];
+        $bType = $cartReq['batch_type'];
+        $requiredQty = $cartReq['quantity'];
+
         $stmtStock = $pdo->prepare("
-            SELECT m.name, COALESCE(i.online_pool_qty, 0) AS online_pool_qty, i.sell_by
-            FROM menu_items m
-            LEFT JOIN inventory i ON m.id = i.menu_item_id
-            WHERE m.id = ?
+            SELECT b.id, b.remaining_stock, b.sell_by, m.name
+            FROM batches b
+            JOIN menu_items m ON b.menu_item_id = m.id
+            WHERE b.menu_item_id = ? AND b.state = ? AND b.remaining_stock > 0
+            ORDER BY b.sell_by ASC
         ");
-        $stmtStock->execute([$itemId]);
-        $stockRow = $stmtStock->fetch(PDO::FETCH_ASSOC);
+        $stmtStock->execute([$itemId, $bType]);
+        $stockRows = $stmtStock->fetchAll(PDO::FETCH_ASSOC);
 
-        $dishName = $stockRow ? $stockRow['name'] : "Dish #$itemId";
-        $availableQty = $stockRow ? max(0, (int)$stockRow['online_pool_qty']) : 0;
-
-        if (!$stockRow || $availableQty < $requiredQty) {
-            jsonResponse(['error' => "Out of stock: Only {$availableQty} portions of {$dishName} remaining."], 400);
+        $dishName = !empty($stockRows) ? $stockRows[0]['name'] : "Dish #$itemId";
+        $availableQty = 0;
+        foreach ($stockRows as $sr) {
+            $availableQty += (int)$sr['remaining_stock'];
         }
 
-        // Food Safety Check: Sell-By timestamp
-        if (!empty($stockRow['sell_by'])) {
+        if ($availableQty < $requiredQty) {
+            jsonResponse(['error' => "Out of stock: Only {$availableQty} portions of {$dishName} ({$bType}) remaining."], 400);
+        }
+
+        // Food Safety Check: Sell-By timestamp of earliest batch
+        if (!empty($stockRows[0]['sell_by'])) {
             date_default_timezone_set('Asia/Manila');
-            if (time() >= strtotime($stockRow['sell_by'])) {
-                jsonResponse(['error' => "Food safety violation: Item '{$dishName}' has passed its safe sell-by expiration time ({$stockRow['sell_by']}) and cannot be ordered."], 400);
+            if (time() >= strtotime($stockRows[0]['sell_by'])) {
+                jsonResponse(['error' => "Food safety violation: Item '{$dishName}' ({$bType}) has passed its safe sell-by expiration time ({$stockRows[0]['sell_by']}) and cannot be ordered."], 400);
             }
         }
     }
@@ -762,51 +856,84 @@ function handleCreateReservation($pdo)
         $paymongoLineItems = [];
 
         $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
-        $updateInventory = $pdo->prepare("UPDATE inventory SET online_pool_qty = online_pool_qty - ?, delisted_from_app = CASE WHEN online_pool_qty - ? <= critical_stock_threshold THEN 1 ELSE 0 END WHERE menu_item_id = ? AND online_pool_qty >= ?");
-
         $checkClaims = $pdo->prepare("SELECT quantity_claimed FROM daily_discount_claims WHERE user_id = ? AND menu_item_id = ? AND claim_date = CURDATE()");
         $upsertClaims = $pdo->prepare("INSERT INTO daily_discount_claims (user_id, menu_item_id, claim_date, quantity_claimed) VALUES (?, ?, CURDATE(), ?) ON DUPLICATE KEY UPDATE quantity_claimed = quantity_claimed + ?");
 
         foreach ($input['items'] as $item) {
-            $item_id = $item['menu_item_id'];
+            $rawId = $item['menu_item_id'] ?? ($item['original_dish_id'] ?? 0);
+            $item_id = (int)explode('_', (string)$rawId)[0];
+            $batch_type = (!empty($item['batch_type']) && in_array($item['batch_type'], ['fresh', 'reheated'], true))
+                ? $item['batch_type']
+                : ((is_string($rawId) && strpos($rawId, 'reheated') !== false) ? 'reheated' : 'fresh');
+
             $qty = (int)$item['quantity'];
 
-            // Validate inventory, food safety & calculate price using unified PricingEngine
+            // Query active batches FOR UPDATE (FIFO ordering by sell_by ASC)
             $stmt = $pdo->prepare("
-                SELECT m.name, m.base_price, m.price_floor, COALESCE(i.online_pool_qty, 0) AS online_pool_qty, i.sell_by 
-                FROM menu_items m 
-                LEFT JOIN inventory i ON m.id = i.menu_item_id 
-                WHERE m.id = ?
+                SELECT b.id, b.remaining_stock, b.sell_by, b.hold_hours, m.name, m.base_price, m.price_floor, m.hold_hours AS dish_hold_hours
+                FROM batches b
+                JOIN menu_items m ON b.menu_item_id = m.id
+                WHERE b.menu_item_id = ? AND b.state = ? AND b.remaining_stock > 0
+                ORDER BY b.sell_by ASC
                 FOR UPDATE
             ");
-            $stmt->execute([$item_id]);
-            $itemData = $stmt->fetch();
+            $stmt->execute([$item_id, $batch_type]);
+            $batches = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $dishName = $itemData ? $itemData['name'] : "Item $item_id";
-            $availableQty = $itemData ? max(0, (int)$itemData['online_pool_qty']) : 0;
+            if (empty($batches)) {
+                $dStmt = $pdo->prepare("SELECT name FROM menu_items WHERE id = ?");
+                $dStmt->execute([$item_id]);
+                $dishName = $dStmt->fetchColumn() ?: "Item #$item_id";
+                throw new BusinessException("Out of stock: No {$batch_type} portions of {$dishName} remaining.", 400);
+            }
 
-            if (!$itemData || $availableQty < $qty) {
-                throw new BusinessException("Out of stock: Only {$availableQty} portions of {$dishName} remaining.", 400);
+            $dishName = $batches[0]['name'];
+            $base_price = (float)$batches[0]['base_price'];
+            $price_floor = (float)$batches[0]['price_floor'];
+            $earliestSellBy = $batches[0]['sell_by'];
+
+            $availableQty = 0;
+            foreach ($batches as $b) {
+                $availableQty += (int)$b['remaining_stock'];
+            }
+
+            if ($availableQty < $qty) {
+                throw new BusinessException("Out of stock: Only {$availableQty} portions of {$dishName} ({$batch_type}) remaining.", 400);
             }
 
             // Food Safety Enforcement: Check sell_by in Asia/Manila
-            if (!empty($itemData['sell_by'])) {
-                $sellByDateTime = new DateTime($itemData['sell_by'], $tz);
+            if (!empty($earliestSellBy)) {
+                $sellByDateTime = new DateTime($earliestSellBy, $tz);
                 if ($now >= $sellByDateTime) {
-                    throw new BusinessException("Food safety violation: Item '$dishName' has passed its safe sell-by expiration time ({$itemData['sell_by']}) and cannot be ordered.", 422);
+                    throw new BusinessException("Food safety violation: Item '$dishName' ($batch_type) has passed its safe sell-by expiration time ({$earliestSellBy}) and cannot be ordered.", 422);
                 }
                 // Pickup time must be <= sell_by of all requested items
                 if ($fulfillment_type === 'take_out' && $pickupDateTime && $pickupDateTime > $sellByDateTime) {
-                    throw new BusinessException("Pickup time ({$pickup_time}) exceeds safe sell-by time for '{$dishName}' ({$itemData['sell_by']}).", 422);
+                    throw new BusinessException("Pickup time ({$pickup_time}) exceeds safe sell-by time for '{$dishName}' ({$earliestSellBy}).", 422);
                 }
             }
 
-            $current_price = PricingEngine::calculateCurrentPrice(
-                $itemData['base_price'],
-                $itemData['price_floor'],
-                $settings
-            );
-            $is_discounted = ($current_price < $itemData['base_price']);
+            // Calculate unit price using Time-Based Pricing Engine rules
+            if ($batch_type === 'reheated') {
+                $discountPercent = 50.0;
+            } else {
+                $holdHours = (int)($batches[0]['dish_hold_hours'] ?? ($batches[0]['hold_hours'] ?? 6));
+                $holdSeconds = max(1, $holdHours * 3600);
+                $timeLeftSeconds = max(0, strtotime($earliestSellBy) - time());
+                $timeRatio = $timeLeftSeconds / $holdSeconds;
+
+                if ($timeRatio > 0.50) {
+                    $discountPercent = 0.0;
+                } elseif ($timeRatio > 0.25) {
+                    $discountPercent = 25.0;
+                } else {
+                    $discountPercent = 40.0;
+                }
+            }
+
+            $current_price = round($base_price * (1.0 - ($discountPercent / 100.0)), 2);
+
+            $is_discounted = ($current_price < $base_price);
 
             // Anti-hoarding check using max_discount_qty from global settings
             if ($is_discounted) {
@@ -836,16 +963,42 @@ function handleCreateReservation($pdo)
             $total_amount += ($current_price * $qty);
 
             $paymongoLineItems[] = [
-                'name' => $dishName,
+                'name' => $dishName . ($batch_type === 'reheated' ? ' (Reheated)' : ''),
                 'quantity' => $qty,
                 'amount' => (int)round($current_price * 100),
                 'currency' => 'PHP'
             ];
 
-            $updateInventory->execute([$qty, $qty, $item_id, $qty]);
-            if ($updateInventory->rowCount() === 0) {
-                throw new BusinessException("Out of stock: Only 0 portions of {$dishName} remaining.", 400);
+            // FIFO Deduction across batches: decrement remaining_stock until qty is fulfilled
+            $remainingToDeduct = $qty;
+            $stmtUpdateBatch = $pdo->prepare("
+                UPDATE batches
+                SET remaining_stock = remaining_stock - ?
+                WHERE id = ? AND remaining_stock >= ?
+            ");
+
+            foreach ($batches as $b) {
+                if ($remainingToDeduct <= 0) break;
+                $deductFromThis = min((int)$b['remaining_stock'], $remainingToDeduct);
+
+                $stmtUpdateBatch->execute([$deductFromThis, $b['id'], $deductFromThis]);
+                if ($stmtUpdateBatch->rowCount() > 0) {
+                    $remainingToDeduct -= $deductFromThis;
+                }
             }
+
+            if ($remainingToDeduct > 0) {
+                throw new BusinessException("Out of stock: Unable to fulfill {$qty} portions from {$batch_type} batches of {$dishName}.", 400);
+            }
+
+            // Sync with inventory table
+            $updateInventory = $pdo->prepare("
+                UPDATE inventory 
+                SET online_pool_qty = GREATEST(0, online_pool_qty - ?),
+                    delisted_from_app = CASE WHEN online_pool_qty - ? <= critical_stock_threshold THEN 1 ELSE delisted_from_app END
+                WHERE menu_item_id = ?
+            ");
+            $updateInventory->execute([$qty, $qty, $item_id]);
         }
 
         $checkoutSession = null;
