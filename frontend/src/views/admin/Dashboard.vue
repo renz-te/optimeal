@@ -46,27 +46,12 @@
     </div>
 
     <!-- Tab Navigation -->
-    <div class="flex items-center space-x-2 border-b border-slate-200 mb-8 pb-px">
-      <button
-        type="button"
-        id="tab-btn-settings"
-        @click="activeTab = 'settings'"
-        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer"
-        :class="
-          activeTab === 'settings'
-            ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
-            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-        "
-      >
-        <Sliders :size="16" />
-        <span>System Settings</span>
-      </button>
-
+    <div class="flex items-center space-x-2 border-b border-slate-200 mb-8 pb-px overflow-x-auto hide-scrollbar">
       <button
         type="button"
         id="tab-btn-overview"
         @click="activeTab = 'overview'"
-        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer shrink-0"
         :class="
           activeTab === 'overview'
             ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
@@ -74,27 +59,57 @@
         "
       >
         <LayoutDashboard :size="16" />
-        <span>Platform Overview</span>
+        <span>Overview</span>
       </button>
 
       <button
         type="button"
-        id="tab-btn-all"
-        @click="activeTab = 'all'"
-        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer"
+        id="tab-btn-operations"
+        @click="activeTab = 'operations'"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer shrink-0"
         :class="
-          activeTab === 'all'
+          activeTab === 'operations'
             ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
             : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
         "
       >
-        <Layers :size="16" />
-        <span>All Sections</span>
+        <Clock :size="16" />
+        <span>Operations</span>
+      </button>
+
+      <button
+        type="button"
+        id="tab-btn-flags"
+        @click="activeTab = 'flags'"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer shrink-0"
+        :class="
+          activeTab === 'flags'
+            ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+        "
+      >
+        <Sliders :size="16" />
+        <span>Feature Flags</span>
+      </button>
+
+      <button
+        type="button"
+        id="tab-btn-taxonomy"
+        @click="activeTab = 'taxonomy'"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer shrink-0"
+        :class="
+          activeTab === 'taxonomy'
+            ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+        "
+      >
+        <ListTree :size="16" />
+        <span>Allergen Taxonomy</span>
       </button>
     </div>
 
     <!-- Platform Overview Section -->
-    <div v-show="activeTab === 'all' || activeTab === 'overview'" class="space-y-8 mb-8">
+    <div v-show="activeTab === 'overview'" class="space-y-8 mb-8">
       <!-- Live Platform Metrics Grid -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       <!-- Card 1: Users -->
@@ -267,7 +282,7 @@
         <!-- Master Status Badge -->
         <div>
           <span
-            v-if="settingsForm.ai_enabled"
+            v-if="settingsForm.enable_ai_recipe_generation"
             class="px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center"
           >
             <span
@@ -286,48 +301,40 @@
       </div>
 
       <div class="p-6 lg:p-8 space-y-6">
-        <!-- Master Toggle Row -->
+        <!-- Master Status Row (Read-Only Status Badge) -->
         <div
           class="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 bg-slate-50/80 rounded-xl border border-slate-200 gap-4"
         >
           <div>
             <h3 class="font-bold text-slate-900 text-sm">
-              AI Recipe & Dish Generation Master Switch
+              AI Recipe & Dish Generation Status
             </h3>
             <p class="text-xs text-slate-500 mt-0.5 leading-relaxed">
               When toggled off, all AI dish generation, enrichment, and
-              ingredient breakdowns are blocked across the vendor terminal.
+              ingredient breakdowns are blocked across the vendor terminal. Manage this setting in the Feature Flags tab.
             </p>
           </div>
 
           <div class="flex items-center space-x-3 shrink-0">
             <span
-              class="text-xs font-bold"
+              id="ai-recipe-status-badge"
+              class="px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center"
               :class="
-                settingsForm.ai_enabled ? 'text-emerald-700' : 'text-slate-400'
-              "
-            >
-              {{ settingsForm.ai_enabled ? "ENABLED" : "DISABLED" }}
-            </span>
-            <button
-              id="toggle-ai-enabled"
-              type="button"
-              role="switch"
-              :aria-checked="settingsForm.ai_enabled"
-              @click="handleToggleAi"
-              :disabled="togglingAi"
-              class="relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50"
-              :class="
-                settingsForm.ai_enabled ? 'bg-purple-600' : 'bg-slate-300'
+                settingsForm.enable_ai_recipe_generation
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  : 'bg-rose-100 text-rose-800 border border-rose-300'
               "
             >
               <span
-                class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
+                class="w-2 h-2 rounded-full mr-2"
                 :class="
-                  settingsForm.ai_enabled ? 'translate-x-7' : 'translate-x-0'
+                  settingsForm.enable_ai_recipe_generation
+                    ? 'bg-emerald-500 animate-pulse'
+                    : 'bg-rose-500'
                 "
-              />
-            </button>
+              ></span>
+              {{ settingsForm.enable_ai_recipe_generation ? "Active" : "Disabled" }}
+            </span>
           </div>
         </div>
 
@@ -435,8 +442,8 @@
     </div>
     </div>
 
-    <!-- System Settings Section -->
-    <div v-show="activeTab === 'all' || activeTab === 'settings'" class="space-y-8">
+    <!-- Operations Section -->
+    <div v-show="activeTab === 'operations'" class="space-y-8 mb-8">
       <!-- Alert / Notice inside Settings -->
       <div
         v-if="settingsError"
@@ -579,88 +586,31 @@
                 </div>
               </div>
             </transition>
-          </div>
-        </div>
-      </div>
 
-      <!-- PANEL 2: FEATURE FLAGS & CONFIGURATION SAVE -->
-      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div class="flex items-center space-x-3">
-            <div class="p-2 bg-indigo-100 text-indigo-800 rounded-xl">
-              <Sliders :size="20" />
-            </div>
-            <div>
-              <h2 class="text-lg font-bold text-slate-900">Platform Feature Flags</h2>
-              <p class="text-xs text-slate-500 mt-0.5">
-                Enable or disable core system modules dynamically across the cafeteria ecosystem.
-              </p>
-            </div>
-          </div>
-          <span class="text-xs font-semibold text-slate-400">6 Global Feature Flags</span>
-        </div>
-
-        <div class="p-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div
-              v-for="flag in featureFlagsList"
-              :key="flag.key"
-              class="flex items-center justify-between p-4 rounded-xl border transition-all"
-              :class="settingsForm[flag.key] ? 'bg-emerald-50/30 border-emerald-200 shadow-xs' : 'bg-slate-50/70 border-slate-200'"
-            >
-              <div class="pr-4">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-sm font-bold text-slate-900">{{ flag.label }}</span>
-                  <span
-                    class="text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider"
-                    :class="settingsForm[flag.key] ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-200 text-slate-600'"
-                  >
-                    {{ settingsForm[flag.key] ? 'Enabled' : 'Disabled' }}
-                  </span>
-                </div>
-                <p class="text-xs text-slate-500 leading-relaxed">{{ flag.description }}</p>
+            <!-- Save Operating Hours Action Button -->
+            <div class="mt-6 pt-6 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div class="text-xs text-slate-500">
+                <span v-if="settingsForm.updated_at" class="font-mono">
+                  Last persisted: {{ new Date(settingsForm.updated_at).toLocaleTimeString() }}
+                </span>
+                <span v-else>Click save to apply changes to operating hours.</span>
               </div>
 
               <button
+                id="save-operations-btn"
                 type="button"
-                role="switch"
-                :id="'toggle-' + flag.key"
-                :aria-checked="settingsForm[flag.key]"
-                @click="settingsForm[flag.key] = !settingsForm[flag.key]"
-                class="relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                :class="settingsForm[flag.key] ? 'bg-emerald-600' : 'bg-slate-300'"
+                @click="handleSaveConfiguration"
+                :disabled="savingSettings"
+                class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <span
-                  class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
-                  :class="settingsForm[flag.key] ? 'translate-x-7' : 'translate-x-0'"
-                />
+                  v-if="savingSettings"
+                  class="inline-block animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                ></span>
+                <Save v-else :size="16" />
+                <span>{{ savingSettings ? "Saving Settings..." : "Save Operating Hours" }}</span>
               </button>
             </div>
-          </div>
-
-          <!-- Save Configuration Action Button -->
-          <div class="mt-6 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div class="text-xs text-slate-500">
-              <span v-if="settingsForm.updated_at" class="font-mono">
-                Last persisted: {{ new Date(settingsForm.updated_at).toLocaleTimeString() }}
-              </span>
-              <span v-else>Click save to apply changes to operating hours and feature flags.</span>
-            </div>
-
-            <button
-              id="save-settings-btn"
-              type="button"
-              @click="handleSaveConfiguration"
-              :disabled="savingSettings"
-              class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2"
-            >
-              <span
-                v-if="savingSettings"
-                class="inline-block animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-              ></span>
-              <Save v-else :size="16" />
-              <span>{{ savingSettings ? "Saving Settings..." : "Save Configuration" }}</span>
-            </button>
           </div>
         </div>
       </div>
@@ -803,11 +753,111 @@
         </div>
       </div>
     </div>
+
+    <!-- Feature Flags Section -->
+    <div v-show="activeTab === 'flags'" class="space-y-8 mb-8">
+      <!-- Alert / Notice inside Flags -->
+      <div
+        v-if="settingsError"
+        class="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl text-sm font-semibold flex items-center"
+      >
+        <AlertCircle :size="18" class="mr-2 shrink-0" />
+        <span>{{ settingsError }}</span>
+      </div>
+
+      <!-- PANEL 2: FEATURE FLAGS & CONFIGURATION SAVE -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 bg-indigo-100 text-indigo-800 rounded-xl">
+              <Sliders :size="20" />
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-slate-900">Platform Feature Flags</h2>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Enable or disable core system modules dynamically across the cafeteria ecosystem.
+              </p>
+            </div>
+          </div>
+          <span class="text-xs font-semibold text-slate-400">6 Global Feature Flags</span>
+        </div>
+
+        <div class="p-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div
+              v-for="flag in featureFlagsList"
+              :key="flag.key"
+              class="flex items-center justify-between p-4 rounded-xl border transition-all"
+              :class="settingsForm[flag.key] ? 'bg-emerald-50/30 border-emerald-200 shadow-xs' : 'bg-slate-50/70 border-slate-200'"
+            >
+              <div class="pr-4">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-sm font-bold text-slate-900">{{ flag.label }}</span>
+                  <span
+                    class="text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider"
+                    :class="settingsForm[flag.key] ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-200 text-slate-600'"
+                  >
+                    {{ settingsForm[flag.key] ? 'Enabled' : 'Disabled' }}
+                  </span>
+                </div>
+                <p class="text-xs text-slate-500 leading-relaxed">{{ flag.description }}</p>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                :id="'toggle-' + flag.key"
+                :aria-checked="settingsForm[flag.key]"
+                @click="settingsForm[flag.key] = !settingsForm[flag.key]"
+                class="relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                :class="settingsForm[flag.key] ? 'bg-emerald-600' : 'bg-slate-300'"
+              >
+                <span
+                  class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
+                  :class="settingsForm[flag.key] ? 'translate-x-7' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Save Configuration Action Button -->
+          <div class="mt-6 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="text-xs text-slate-500">
+              <span v-if="settingsForm.updated_at" class="font-mono">
+                Last persisted: {{ new Date(settingsForm.updated_at).toLocaleTimeString() }}
+              </span>
+              <span v-else>Click save to apply changes to feature flags.</span>
+            </div>
+
+            <button
+              id="save-settings-btn"
+              type="button"
+              @click="handleSaveConfiguration"
+              :disabled="savingSettings"
+              class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2 cursor-pointer"
+            >
+              <span
+                v-if="savingSettings"
+                class="inline-block animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+              ></span>
+              <Save v-else :size="16" />
+              <span>{{ savingSettings ? "Saving Settings..." : "Save Configuration" }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Allergen Taxonomy Section -->
+    <div v-show="activeTab === 'taxonomy'" class="mb-8">
+      <Taxonomy />
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from "vue";
+import Taxonomy from "./Taxonomy.vue";
 import {
   Users,
   Utensils,
@@ -826,9 +876,10 @@ import {
   AlertTriangle,
   Info,
   Layers,
+  ListTree,
 } from "lucide-vue-next";
 
-const activeTab = ref("settings");
+const activeTab = ref("overview");
 const loadingMetrics = ref(false);
 const loadingSettings = ref(false);
 const savingSettings = ref(false);
