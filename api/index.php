@@ -187,6 +187,12 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif ($route === '/vendor/menu/launch' && $method === 'POST') {
     require 'routes/vendor.php';
     handleLaunchMenu($pdo);
+} elseif (($route === '/vendor/batches' || $route === '/api/vendor/batches') && $method === 'POST') {
+    require 'routes/vendor.php';
+    handleCreateBatch($pdo);
+} elseif (($route === '/vendor/batches' || $route === '/api/vendor/batches') && $method === 'GET') {
+    require 'routes/vendor.php';
+    handleGetBatches($pdo);
 } elseif ($route === '/vendor/audit' && $method === 'GET') {
     requireStaff($pdo);
     require 'routes/vendor.php';

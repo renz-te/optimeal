@@ -941,6 +941,7 @@ function handleGetVendorMenu($pdo) {
         SELECT m.id, m.store_id, m.name, m.description, m.category, m.dietary, 
                m.base_price, m.price_floor, m.image_url, m.calories, m.protein_g, 
                m.carbs_g, m.fat_g, m.sodium_mg, m.ai_confirmed, m.is_active,
+               m.hold_hours, m.refrigerated_hours, m.reheat_hours, m.reheatable,
                i.walkin_pool_qty, i.online_pool_qty, i.critical_stock_threshold, i.delisted_from_app,
                i.cooked_at, i.sell_by,
                pr.rush_hour_end_time, pr.decay_start_offset_minutes, pr.decay_rate_percent, 
@@ -953,6 +954,43 @@ function handleGetVendorMenu($pdo) {
     ");
     $stmt->execute([$store_id]);
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Fetch and group active batches (remaining_stock > 0 and state != 'discarded') under menu_item_id
+    $batchStmt = $pdo->prepare("
+        SELECT b.id, b.menu_item_id, b.parent_batch_id, b.state, b.cooked_at, b.cooled_at,
+               b.reheated_at, b.hold_hours, b.refrigerated_hours, b.reheat_hours, b.sell_by,
+               b.total_stock, b.remaining_stock, b.created_at
+        FROM batches b
+        JOIN menu_items m ON b.menu_item_id = m.id
+        WHERE m.store_id = ? AND b.remaining_stock > 0 AND b.state != 'discarded'
+        ORDER BY b.cooked_at ASC, b.id ASC
+    ");
+    $batchStmt->execute([$store_id]);
+    $allBatches = $batchStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $batchesByMenuItem = [];
+    foreach ($allBatches as $b) {
+        $mId = (int)$b['menu_item_id'];
+        if (!isset($batchesByMenuItem[$mId])) {
+            $batchesByMenuItem[$mId] = [];
+        }
+        $batchesByMenuItem[$mId][] = [
+            'id' => (int)$b['id'],
+            'menu_item_id' => $mId,
+            'parent_batch_id' => $b['parent_batch_id'] !== null ? (int)$b['parent_batch_id'] : null,
+            'state' => $b['state'],
+            'cooked_at' => $b['cooked_at'],
+            'cooled_at' => $b['cooled_at'],
+            'reheated_at' => $b['reheated_at'],
+            'hold_hours' => (int)$b['hold_hours'],
+            'refrigerated_hours' => (int)$b['refrigerated_hours'],
+            'reheat_hours' => (int)$b['reheat_hours'],
+            'sell_by' => $b['sell_by'],
+            'total_stock' => (int)$b['total_stock'],
+            'remaining_stock' => (int)$b['remaining_stock'],
+            'created_at' => $b['created_at']
+        ];
+    }
 
     $result = [];
     foreach ($items as $item) {
@@ -1028,7 +1066,12 @@ function handleGetVendorMenu($pdo) {
             'macros' => $macros,
             'reserved_qty' => (int)$resData['reserved_qty'],
             'pickup_slots' => $resData['pickup_slots'],
-            'slots_summary' => $resData['slots_summary']
+            'slots_summary' => $resData['slots_summary'],
+            'hold_hours' => isset($item['hold_hours']) ? (int)$item['hold_hours'] : 6,
+            'refrigerated_hours' => isset($item['refrigerated_hours']) ? (int)$item['refrigerated_hours'] : 72,
+            'reheat_hours' => isset($item['reheat_hours']) ? (int)$item['reheat_hours'] : 3,
+            'reheatable' => isset($item['reheatable']) ? (bool)$item['reheatable'] : true,
+            'batches' => $batchesByMenuItem[(int)$item['id']] ?? []
         ];
     }
 
@@ -2792,5 +2835,228 @@ function handlePatchCafeteria($pdo, $input = null)
 
     jsonResponse(['status' => 'success']);
 }
+
+function handleGetBatches($pdo)
+{
+    $store_id = requireVendor($pdo);
+    $menuItemId = isset($_GET['menu_item_id']) ? (int)$_GET['menu_item_id'] : null;
+
+    if ($menuItemId) {
+        $stmt = $pdo->prepare("
+            SELECT b.*, m.name as dish_name
+            FROM batches b
+            JOIN menu_items m ON b.menu_item_id = m.id
+            WHERE m.store_id = ? AND b.menu_item_id = ? AND b.state != 'discarded'
+            ORDER BY b.id DESC
+        ");
+        $stmt->execute([$store_id, $menuItemId]);
+    } else {
+        $stmt = $pdo->prepare("
+            SELECT b.*, m.name as dish_name
+            FROM batches b
+            JOIN menu_items m ON b.menu_item_id = m.id
+            WHERE m.store_id = ? AND b.state != 'discarded'
+            ORDER BY b.id DESC
+        ");
+        $stmt->execute([$store_id]);
+    }
+
+    jsonResponse($stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function handleCreateBatch($pdo, $input = null)
+{
+    $store_id = requireVendor($pdo);
+
+    if ($input === null) {
+        $raw = file_get_contents('php://input');
+        $input = json_decode($raw, true) ?? [];
+    }
+
+    if (empty($input['menu_item_id'])) {
+        jsonResponse(['error' => 'Missing menu_item_id'], 400);
+        return;
+    }
+
+    $menuItemId = (int)$input['menu_item_id'];
+    $state = !empty($input['state']) ? $input['state'] : 'fresh';
+    $quantity = isset($input['quantity']) ? (int)$input['quantity'] : 0;
+    $parentBatchId = !empty($input['parent_batch_id']) ? (int)$input['parent_batch_id'] : null;
+
+    if (!in_array($state, ['fresh', 'reheated'], true)) {
+        jsonResponse(['error' => "Invalid batch state. Allowed states: 'fresh', 'reheated'"], 400);
+        return;
+    }
+
+    if ($quantity <= 0) {
+        jsonResponse(['error' => 'Quantity must be greater than zero'], 400);
+        return;
+    }
+
+    // Authz & dish existence check
+    $stmtDish = $pdo->prepare("
+        SELECT id, name, store_id, hold_hours, refrigerated_hours, reheat_hours, reheatable, is_active
+        FROM menu_items
+        WHERE id = ? AND store_id = ?
+    ");
+    $stmtDish->execute([$menuItemId, $store_id]);
+    $dish = $stmtDish->fetch(PDO::FETCH_ASSOC);
+
+    if (!$dish) {
+        jsonResponse(['error' => 'Dish not found or does not belong to your store'], 404);
+        return;
+    }
+
+    date_default_timezone_set('Asia/Manila');
+    $nowManila = date('Y-m-d H:i:s');
+    $holdHours = (int)($dish['hold_hours'] ?? 6);
+    $refrigHours = (int)($dish['refrigerated_hours'] ?? 72);
+    $reheatHours = (int)($dish['reheat_hours'] ?? 3);
+    $reheatable = (bool)($dish['reheatable'] ?? 1);
+
+    try {
+        $pdo->beginTransaction();
+
+        $newBatchId = null;
+
+        if ($state === 'fresh') {
+            $cookedAt = $nowManila;
+            $sellBy = date('Y-m-d H:i:s', strtotime("+$holdHours hours", strtotime($cookedAt)));
+
+            $stmtInsert = $pdo->prepare("
+                INSERT INTO batches (
+                    menu_item_id, parent_batch_id, state, cooked_at,
+                    hold_hours, refrigerated_hours, reheat_hours, sell_by,
+                    total_stock, remaining_stock
+                ) VALUES (?, NULL, 'fresh', ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmtInsert->execute([
+                $menuItemId,
+                $cookedAt,
+                $holdHours,
+                $refrigHours,
+                $reheatHours,
+                $sellBy,
+                $quantity,
+                $quantity
+            ]);
+            $newBatchId = (int)$pdo->lastInsertId();
+
+            // Sync with inventory pool
+            $stmtInv = $pdo->prepare("
+                INSERT INTO inventory (menu_item_id, online_pool_qty, walkin_pool_qty, critical_stock_threshold, delisted_from_app, cooked_at, sell_by)
+                VALUES (?, ?, 0, 2, 0, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    online_pool_qty = online_pool_qty + VALUES(online_pool_qty),
+                    delisted_from_app = 0,
+                    cooked_at = VALUES(cooked_at),
+                    sell_by = VALUES(sell_by)
+            ");
+            $stmtInv->execute([$menuItemId, $quantity, $cookedAt, $sellBy]);
+
+        } elseif ($state === 'reheated') {
+            if (!$reheatable) {
+                $pdo->rollBack();
+                jsonResponse(['error' => 'Dish is marked as non-reheatable'], 400);
+                return;
+            }
+
+            if (!$parentBatchId) {
+                $pdo->rollBack();
+                jsonResponse(['error' => 'parent_batch_id is required for reheated batch'], 400);
+                return;
+            }
+
+            // Lock and inspect parent batch
+            $stmtParent = $pdo->prepare("
+                SELECT id, menu_item_id, remaining_stock, state
+                FROM batches
+                WHERE id = ? AND menu_item_id = ?
+                FOR UPDATE
+            ");
+            $stmtParent->execute([$parentBatchId, $menuItemId]);
+            $parent = $stmtParent->fetch(PDO::FETCH_ASSOC);
+
+            if (!$parent) {
+                $pdo->rollBack();
+                jsonResponse(['error' => 'Parent batch not found for this dish'], 404);
+                return;
+            }
+
+            if ((int)$parent['remaining_stock'] < $quantity) {
+                $pdo->rollBack();
+                jsonResponse([
+                    'error' => "Insufficient stock in parent batch. Remaining: {$parent['remaining_stock']}, Requested: $quantity"
+                ], 400);
+                return;
+            }
+
+            // Decrement parent remaining stock
+            $stmtDec = $pdo->prepare("
+                UPDATE batches
+                SET remaining_stock = remaining_stock - ?
+                WHERE id = ?
+            ");
+            $stmtDec->execute([$quantity, $parentBatchId]);
+
+            $reheatedAt = $nowManila;
+            $sellBy = date('Y-m-d H:i:s', strtotime("+$reheatHours hours", strtotime($reheatedAt)));
+
+            $stmtInsert = $pdo->prepare("
+                INSERT INTO batches (
+                    menu_item_id, parent_batch_id, state, reheated_at,
+                    hold_hours, refrigerated_hours, reheat_hours, sell_by,
+                    total_stock, remaining_stock
+                ) VALUES (?, ?, 'reheated', ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmtInsert->execute([
+                $menuItemId,
+                $parentBatchId,
+                $reheatedAt,
+                $holdHours,
+                $refrigHours,
+                $reheatHours,
+                $sellBy,
+                $quantity,
+                $quantity
+            ]);
+            $newBatchId = (int)$pdo->lastInsertId();
+
+            // Sync with inventory pool
+            $stmtInv = $pdo->prepare("
+                INSERT INTO inventory (menu_item_id, online_pool_qty, walkin_pool_qty, critical_stock_threshold, delisted_from_app, cooked_at, sell_by)
+                VALUES (?, ?, 0, 2, 0, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    online_pool_qty = online_pool_qty + VALUES(online_pool_qty),
+                    delisted_from_app = 0,
+                    sell_by = VALUES(sell_by)
+            ");
+            $stmtInv->execute([$menuItemId, $quantity, $reheatedAt, $sellBy]);
+        }
+
+        // Activate dish if inactive
+        $pdo->prepare("UPDATE menu_items SET is_active = 1 WHERE id = ?")->execute([$menuItemId]);
+
+        $pdo->commit();
+
+        // Fetch newly created batch row
+        $stmtFetch = $pdo->prepare("SELECT * FROM batches WHERE id = ?");
+        $stmtFetch->execute([$newBatchId]);
+        $createdBatch = $stmtFetch->fetch(PDO::FETCH_ASSOC);
+
+        jsonResponse([
+            'status' => 'success',
+            'message' => 'Batch created successfully',
+            'batch' => $createdBatch
+        ], 201);
+
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        jsonResponse(['error' => 'Failed to create batch: ' . $e->getMessage()], 500);
+    }
+}
+
 
 
