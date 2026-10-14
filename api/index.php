@@ -215,14 +215,33 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleResolveSubmission($pdo);
-} elseif ($route === '/admin/settings' && $method === 'GET') {
-    requireAdmin($pdo);
+} elseif (($route === '/admin/settings' || $route === '/api/admin/settings') && $method === 'GET') {
+    requireRole($pdo, ['admin']);
     require 'routes/admin.php';
     handleGetSettings($pdo);
-} elseif ($route === '/admin/settings' && $method === 'POST') {
-    requireAdmin($pdo);
+} elseif (($route === '/admin/settings' || $route === '/api/admin/settings') && $method === 'PATCH') {
+    requireRole($pdo, ['admin']);
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    require 'routes/admin.php';
+    handlePatchSettings($pdo, $input);
+} elseif (($route === '/admin/settings/announcement' || $route === '/api/admin/settings/announcement') && $method === 'POST') {
+    requireRole($pdo, ['admin']);
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    require 'routes/admin.php';
+    handlePostAnnouncement($pdo, $input);
+} elseif (($route === '/admin/settings' || $route === '/api/admin/settings') && $method === 'POST') {
+    requireRole($pdo, ['admin']);
     require 'routes/admin.php';
     handleUpdateSettings($pdo);
+} elseif (($route === '/vendor/cafeteria' || $route === '/api/vendor/cafeteria') && $method === 'GET') {
+    requireRole($pdo, ['vendor', 'admin']);
+    require 'routes/vendor.php';
+    handleGetCafeteria($pdo);
+} elseif (($route === '/vendor/cafeteria' || $route === '/api/vendor/cafeteria') && ($method === 'PATCH' || $method === 'POST')) {
+    requireRole($pdo, ['vendor', 'admin']);
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    require 'routes/vendor.php';
+    handlePatchCafeteria($pdo, $input);
 } elseif ($route === '/admin/metrics' && $method === 'GET') {
     requireAdmin($pdo);
     require 'routes/admin.php';

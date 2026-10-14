@@ -333,9 +333,8 @@ function handleResolveSubmission($pdo)
     }
 }
 
-function handleGetSettings(PDO $pdo): void
+function handleGetSettings($pdo)
 {
-    requireAdmin($pdo);
     $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -344,21 +343,123 @@ function handleGetSettings(PDO $pdo): void
         return;
     }
 
+    $boolKeys = [
+        'ai_enabled',
+        'emergency_clearance_active',
+        'enable_reservations',
+        'enable_paymongo',
+        'enable_ai_recipe_generation',
+        'enable_global_announcements',
+        'enable_decay_pricing',
+        'enable_reservation_quota_suggestions'
+    ];
+    foreach ($boolKeys as $k) {
+        if (array_key_exists($k, $settings)) {
+            $settings[$k] = (bool)$settings[$k];
+        }
+    }
+
     $tz = new DateTimeZone('Asia/Manila');
     $today = (new DateTime('now', $tz))->format('Y-m-d');
-    $isOverrideActive = (!empty($settings['override_closing_date']) &&
-        $settings['override_closing_date'] === $today &&
-        !empty($settings['override_closing_time']));
+    $expiresAt = $settings['override_expires_at'] ?? $settings['override_closing_date'] ?? null;
+    $isOverrideActive = (!empty($settings['override_closing_time']) &&
+        !empty($expiresAt) &&
+        $expiresAt >= $today);
 
-    $effectiveClosing = PricingEngine::getEffectiveClosingTime($settings);
+    $effectiveClosing = function_exists('getEffectiveClosingTime')
+        ? getEffectiveClosingTime($pdo)
+        : PricingEngine::getEffectiveClosingTime($settings);
 
     $settings['effective_closing_time'] = $effectiveClosing;
     $settings['is_override_active'] = $isOverrideActive;
 
-    jsonResponse([
-        'settings' => $settings,
-        'data' => $settings
-    ]);
+    $response = $settings;
+    $response['settings'] = $settings;
+    $response['data'] = $settings;
+
+    jsonResponse($response);
+}
+
+function handlePatchSettings($pdo, $input = null)
+{
+    if ($input === null) {
+        $raw = file_get_contents('php://input');
+        $input = json_decode($raw, true) ?? [];
+    }
+
+    $allowedKeys = [
+        'override_closing_time',
+        'override_expires_at',
+        'enable_reservations',
+        'enable_paymongo',
+        'enable_ai_recipe_generation',
+        'enable_global_announcements',
+        'enable_decay_pricing',
+        'enable_reservation_quota_suggestions'
+    ];
+
+    $updates = [];
+    $params = [];
+
+    foreach ($input as $key => $value) {
+        if (in_array($key, $allowedKeys, true)) {
+            $updates[] = "`$key` = ?";
+            if (is_bool($value)) {
+                $params[] = $value ? 1 : 0;
+            } elseif ($value === '' || $value === null) {
+                $params[] = null;
+            } else {
+                $params[] = $value;
+            }
+        }
+    }
+
+    if (!empty($updates)) {
+        $sql = "UPDATE settings SET " . implode(', ', $updates) . " WHERE id = 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    jsonResponse(['status' => 'success']);
+}
+
+function handlePostAnnouncement($pdo, $input = null)
+{
+    if ($input === null) {
+        $raw = file_get_contents('php://input');
+        $input = json_decode($raw, true) ?? [];
+    }
+
+    $announcement = isset($input['global_announcement']) ? trim((string)$input['global_announcement']) : null;
+    $severity = isset($input['announcement_severity']) && in_array($input['announcement_severity'], ['info', 'warning', 'critical'], true)
+        ? $input['announcement_severity']
+        : 'info';
+    $expiresAt = !empty($input['announcement_expires_at']) ? $input['announcement_expires_at'] : null;
+
+    if ($announcement === '') {
+        $announcement = null;
+    }
+
+    // Update settings table
+    $stmt = $pdo->prepare("
+        UPDATE settings 
+        SET global_announcement = ?, announcement_severity = ?, announcement_expires_at = ?
+        WHERE id = 1
+    ");
+    $stmt->execute([$announcement, $severity, $expiresAt]);
+
+    // Broadcast notification to active users (non-admin)
+    if (!empty($announcement)) {
+        $notifStmt = $pdo->prepare("
+            INSERT INTO notifications (user_id, type, title, message)
+            SELECT id, 'announcement', 'System Announcement', ?
+            FROM users
+            WHERE role != 'admin'
+        ");
+        $notifStmt->execute([$announcement]);
+    }
+
+    jsonResponse(['status' => 'success']);
 }
 
 function handleUpdateSettings(PDO $pdo): void

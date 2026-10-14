@@ -2726,3 +2726,71 @@ function handleGetPrepPlan($pdo) {
     ]);
 }
 
+function handleGetCafeteria($pdo)
+{
+    $stmt = $pdo->query("SELECT * FROM cafeteria WHERE id = 1");
+    $cafeteria = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$cafeteria) {
+        jsonResponse(['error' => 'Cafeteria record not found'], 404);
+        return;
+    }
+
+    $cafeteria['id'] = (int)$cafeteria['id'];
+    if (isset($cafeteria['pickup_slot_capacity'])) {
+        $cafeteria['pickup_slot_capacity'] = (int)$cafeteria['pickup_slot_capacity'];
+    }
+    if (isset($cafeteria['walkin_buffer_pct'])) {
+        $cafeteria['walkin_buffer_pct'] = (int)$cafeteria['walkin_buffer_pct'];
+    }
+    if (isset($cafeteria['default_quota'])) {
+        $cafeteria['default_quota'] = (int)$cafeteria['default_quota'];
+    }
+
+    jsonResponse($cafeteria);
+}
+
+function handlePatchCafeteria($pdo, $input = null)
+{
+    if ($input === null) {
+        $raw = file_get_contents('php://input');
+        $input = json_decode($raw, true) ?? [];
+    }
+
+    $allowedKeys = [
+        'tagline',
+        'contact_email',
+        'contact_number',
+        'lunch_cutoff',
+        'dinner_cutoff',
+        'pickup_slot_capacity',
+        'walkin_buffer_pct',
+        'default_quota'
+    ];
+
+    $updates = [];
+    $params = [];
+
+    foreach ($input as $key => $value) {
+        if (in_array($key, $allowedKeys, true)) {
+            $updates[] = "`$key` = ?";
+            if (in_array($key, ['pickup_slot_capacity', 'walkin_buffer_pct', 'default_quota'], true)) {
+                $params[] = $value !== null && $value !== '' ? (int)$value : null;
+            } elseif ($value === '') {
+                $params[] = null;
+            } else {
+                $params[] = $value;
+            }
+        }
+    }
+
+    if (!empty($updates)) {
+        $sql = "UPDATE cafeteria SET " . implode(', ', $updates) . " WHERE id = 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    jsonResponse(['status' => 'success']);
+}
+
+
