@@ -186,6 +186,20 @@ function handleGetMenu($pdo)
     $stmt->execute([$store_id]);
     $items = $stmt->fetchAll();
 
+    // Fetch logged-in user's dietary preferences (medical allergens and dietary boundaries)
+    $userAllergens = [];
+    $userBoundaries = [];
+    $userId = $_SESSION['user_id'] ?? null;
+    if ($userId) {
+        $profileStmt = $pdo->prepare("SELECT allergens, dietary_boundaries FROM student_profiles WHERE user_id = ?");
+        $profileStmt->execute([$userId]);
+        $userProfile = $profileStmt->fetch(PDO::FETCH_ASSOC);
+        if ($userProfile) {
+            $userAllergens = json_decode($userProfile['allergens'] ?? '[]', true) ?: [];
+            $userBoundaries = json_decode($userProfile['dietary_boundaries'] ?? '[]', true) ?: [];
+        }
+    }
+
     $now = time();
     $result = [];
     foreach ($items as $item) {
@@ -288,6 +302,112 @@ function handleGetMenu($pdo)
             ];
         }
 
+        // Evaluate conflict_tier: critical, boundary, or safe
+        $hasCriticalConflict = false;
+        if (!empty($userAllergens)) {
+            foreach ($userAllergens as $ua) {
+                $normUa = strtolower(trim($ua));
+                if ($normUa === '') continue;
+
+                // Match against dish mapped critical allergens
+                foreach ($critical_allergens as $ca) {
+                    $normCa = strtolower(trim($ca));
+                    if ($normCa === $normUa || strpos($normCa, $normUa) !== false || strpos($normUa, $normCa) !== false) {
+                        $hasCriticalConflict = true;
+                        break 2;
+                    }
+                }
+
+                // Match against dish ingredients
+                foreach ($ingredients as $ing) {
+                    $normIng = strtolower(trim($ing));
+                    if (strpos($normIng, $normUa) !== false) {
+                        $hasCriticalConflict = true;
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        $hasBoundaryConflict = false;
+        if (!$hasCriticalConflict && !empty($userBoundaries)) {
+            foreach ($userBoundaries as $ub) {
+                $normUb = strtolower(trim($ub));
+                if ($normUb === '') continue;
+
+                if (strpos($normUb, 'vegetarian') !== false || strpos($normUb, 'vegan') !== false) {
+                    $isVegDish = false;
+                    foreach ($dietary as $dt) {
+                        if (stripos($dt, 'vegetarian') !== false || stripos($dt, 'vegan') !== false) {
+                            $isVegDish = true;
+                            break;
+                        }
+                    }
+                    if (!$isVegDish) {
+                        $meatKeywords = ['pork', 'beef', 'chicken', 'meat', 'fish', 'bacon', 'shrimp', 'crab', 'tuna', 'salmon', 'poultry'];
+                        foreach ($ingredients as $ing) {
+                            $normIng = strtolower($ing);
+                            foreach ($meatKeywords as $mk) {
+                                if (strpos($normIng, $mk) !== false) {
+                                    $hasBoundaryConflict = true;
+                                    break 3;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (strpos($normUb, 'halal') !== false || strpos($normUb, 'pork-free') !== false || strpos($normUb, 'no pork') !== false) {
+                    foreach ($dietary as $dt) {
+                        if (stripos($dt, 'pork') !== false) {
+                            $hasBoundaryConflict = true;
+                            break 2;
+                        }
+                    }
+                    foreach ($ingredients as $ing) {
+                        if (stripos($ing, 'pork') !== false || stripos($ing, 'bacon') !== false || stripos($ing, 'ham') !== false || stripos($ing, 'lard') !== false) {
+                            $hasBoundaryConflict = true;
+                            break 2;
+                        }
+                    }
+                }
+
+                if (strpos($normUb, 'gluten') !== false) {
+                    foreach ($ingredients as $ing) {
+                        if (stripos($ing, 'wheat') !== false || stripos($ing, 'gluten') !== false || stripos($ing, 'flour') !== false) {
+                            $hasBoundaryConflict = true;
+                            break 2;
+                        }
+                    }
+                }
+
+                if (strpos($normUb, 'dairy') !== false) {
+                    foreach ($ingredients as $ing) {
+                        if (stripos($ing, 'milk') !== false || stripos($ing, 'cheese') !== false || stripos($ing, 'butter') !== false || stripos($ing, 'cream') !== false) {
+                            $hasBoundaryConflict = true;
+                            break 2;
+                        }
+                    }
+                }
+
+                foreach ($ingredients as $ing) {
+                    $normIng = strtolower($ing);
+                    if (strpos($normIng, $normUb) !== false) {
+                        $hasBoundaryConflict = true;
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        if ($hasCriticalConflict) {
+            $conflictTier = 'critical';
+        } elseif ($hasBoundaryConflict) {
+            $conflictTier = 'boundary';
+        } else {
+            $conflictTier = 'safe';
+        }
+
         $result[] = [
             'id' => $item['id'],
             'name' => $item['name'],
@@ -306,12 +426,21 @@ function handleGetMenu($pdo)
             'sensitivities' => $digestive_sensitivities,
             'digestive_sensitivities' => $digestive_sensitivities,
             'macros' => $macros,
-            'has_critical' => count($critical_allergens) > 0 ? 1 : 0
+            'has_critical' => count($critical_allergens) > 0 ? 1 : 0,
+            'conflict_tier' => $conflictTier
         ];
     }
 
-    // 3. Sort items: critical allergens to the bottom
+    // 3. Sort items: critical conflicts/allergens to the bottom
     usort($result, function ($a, $b) {
+        $tierOrder = ['safe' => 0, 'boundary' => 1, 'critical' => 2];
+        $tierA = $tierOrder[$a['conflict_tier']] ?? 0;
+        $tierB = $tierOrder[$b['conflict_tier']] ?? 0;
+
+        if ($tierA !== $tierB) {
+            return $tierA <=> $tierB;
+        }
+
         if ($a['has_critical'] == $b['has_critical']) {
             return strcmp($a['name'], $b['name']);
         }
@@ -742,6 +871,19 @@ function handleCreateReservation($pdo)
             $pdo->prepare("UPDATE orders SET total_amount = ?, paymongo_session_id = ? WHERE id = ?")->execute([$total_amount, $sessionId, $order_id]);
         } else {
             $pdo->prepare("UPDATE orders SET total_amount = ? WHERE id = ?")->execute([$total_amount, $order_id]);
+        }
+
+        $overriddenAllergenIds = !empty($input['overridden_allergen_ids']) && is_array($input['overridden_allergen_ids'])
+            ? $input['overridden_allergen_ids']
+            : [];
+
+        if (!empty($overriddenAllergenIds)) {
+            $insOverride = $pdo->prepare("INSERT INTO allergen_overrides (user_id, order_id, allergen_id) VALUES (?, ?, ?)");
+            foreach ($overriddenAllergenIds as $allergenId) {
+                if ((int)$allergenId > 0) {
+                    $insOverride->execute([$user_id, $order_id, (int)$allergenId]);
+                }
+            }
         }
 
         $pdo->commit();

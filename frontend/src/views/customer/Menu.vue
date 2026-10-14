@@ -69,120 +69,140 @@
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div v-for="item in displayDishes" :key="item.id" 
-           class="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow relative overflow-hidden flex flex-col"
-           :class="[
-             getDietaryConflicts(item).hasCriticalAllergen 
-               ? 'border-2 border-red-500 bg-red-50/20 ring-1 ring-red-400' 
-               : (getDietaryConflicts(item).hasSensitivity 
-                   ? 'border-2 border-amber-300 bg-amber-50/20' 
-                   : 'border border-slate-200')
-           ]">
-
-        <!-- Severe Visual Warning Banner -->
-        <div v-if="getDietaryConflicts(item).hasCriticalAllergen" 
-             class="bg-red-600 text-white text-xs font-black px-3.5 py-2 flex items-center justify-between shadow-md relative z-10">
-          <div class="flex items-center gap-1.5 truncate">
-            <AlertTriangle :size="15" class="shrink-0 text-red-100 animate-pulse" />
-            <span class="truncate uppercase tracking-wide">CONTAINS YOUR ALLERGEN: {{ getDietaryConflicts(item).criticalAllergens.join(', ') }}</span>
+      <template v-for="(item, idx) in displayDishes" :key="item.id">
+        <!-- Visual Divider before first critical item -->
+        <div v-if="idx === firstCriticalIndex" 
+             class="col-span-full my-4 flex items-center justify-center gap-4">
+          <div class="flex-grow border-t-2 border-dashed border-rose-300"></div>
+          <div class="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2 rounded-full font-bold text-xs uppercase tracking-wider shadow-sm">
+            <AlertTriangle :size="15" class="text-rose-600 animate-pulse" />
+            <span>— Allergen-Contained Dishes —</span>
           </div>
-        </div>
-        <div v-else-if="getDietaryConflicts(item).hasSensitivity" 
-             class="bg-amber-500 text-white text-xs font-bold px-3.5 py-1.5 flex items-center gap-1.5 shadow-sm relative z-10">
-          <Info :size="14" class="shrink-0 text-amber-100" />
-          <span class="truncate">Notice: Contains {{ getDietaryConflicts(item).sensitivities.join(', ') }}</span>
-        </div>
-           
-        <div class="h-40 bg-slate-100 w-full relative overflow-hidden">
-          <!-- Image placeholder -->
-          <div v-if="!item.image_url" class="absolute inset-0 flex items-center justify-center text-slate-300">
-            <UtensilsCrossed :size="36" class="text-slate-300" />
-          </div>
-          <!-- Real image if exists -->
-          <img v-else :src="getImageUrl(item.image_url)" 
-               loading="lazy"
-               class="w-full h-full object-cover transition-all" 
-               :class="getDietaryConflicts(item).hasCriticalAllergen ? 'opacity-30 grayscale filter contrast-125' : (getDietaryConflicts(item).hasSensitivity ? 'opacity-75' : '')" 
-               :alt="item.name">
-
-          <!-- Dim Overlay Badge for Critical Allergens -->
-          <div v-if="getDietaryConflicts(item).hasCriticalAllergen" class="absolute inset-0 flex items-center justify-center bg-red-950/20 pointer-events-none">
-            <span class="bg-red-600/95 text-white text-[11px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 border border-red-400">
-              <AlertTriangle :size="13" /> Allergen Restricted
-            </span>
-          </div>
-
-          <div v-if="isClearance(item)" class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center">
-            <Clock :size="14" class="mr-1" />
-            {{ calculateDiscountPercent(item) }}% OFF (Surplus Decay)
-          </div>
+          <div class="flex-grow border-t-2 border-dashed border-rose-300"></div>
         </div>
 
-        <div class="p-5 flex-1 flex flex-col">
-          <h3 class="text-lg font-semibold text-slate-900 mb-1">{{ item.name }}</h3>
-          <p class="text-sm text-slate-600 mb-3">{{ item.description }}</p>
-          
-          <div v-if="item.macros && item.macros.calories" class="mb-2">
-            <div class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded inline-block border border-slate-200">
-              Est. {{ item.macros.calories }} kcal • {{ item.macros.protein_g }}g Pro • {{ item.macros.carbs_g }}g Carbs • {{ item.macros.fat_g }}g Fat • {{ item.macros.sodium_mg }}mg Sod
+        <div class="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow relative overflow-hidden flex flex-col"
+             :class="[
+               getItemTier(item) === 'critical' 
+                 ? 'border-2 border-rose-500 bg-rose-50' 
+                 : (getItemTier(item) === 'boundary' 
+                     ? 'border-2 border-amber-300 bg-amber-50/20' 
+                     : 'border border-slate-200')
+             ]">
+
+          <!-- Severe Visual Warning Banner -->
+          <div v-if="getItemTier(item) === 'critical'" 
+               class="bg-rose-600 text-white text-xs font-black px-3.5 py-2 flex items-center justify-between shadow-md relative z-10">
+            <div class="flex items-center gap-1.5 truncate">
+              <AlertTriangle :size="15" class="shrink-0 text-rose-100 animate-pulse" />
+              <span class="truncate uppercase tracking-wide">CONTAINS ALLERGEN: {{ getDietaryConflicts(item).criticalAllergens.join(', ') || (item.critical_allergens || item.allergens || []).join(', ') || 'Medical Allergen' }}</span>
             </div>
           </div>
-          
-          <div v-if="item.ingredients && item.ingredients.length" class="mb-3">
-            <p class="text-[11px] text-slate-500 line-clamp-2 leading-snug">
-              <span class="font-semibold text-slate-700">Ingredients:</span> {{ item.ingredients.join(', ') }}
-            </p>
+          <div v-else-if="getItemTier(item) === 'boundary'" 
+               class="bg-amber-400/90 text-amber-950 text-xs font-bold px-3.5 py-1.5 flex items-center justify-between shadow-sm relative z-10 border-b border-amber-300">
+            <div class="flex items-center gap-1.5 truncate">
+              <Info :size="14" class="shrink-0 text-amber-900" />
+              <span class="truncate">Dietary Conflict: {{ getDietaryConflicts(item).sensitivities.join(', ') || 'Dietary Boundary' }}</span>
+            </div>
+            <span class="bg-amber-100 text-amber-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+              Dietary Conflict
+            </span>
           </div>
-          
-          <div class="flex-1"></div>
+             
+          <div class="h-40 bg-slate-100 w-full relative overflow-hidden">
+            <!-- Image placeholder -->
+            <div v-if="!item.image_url" class="absolute inset-0 flex items-center justify-center text-slate-300">
+              <UtensilsCrossed :size="36" class="text-slate-300" />
+            </div>
+            <!-- Real image if exists -->
+            <img v-else :src="getImageUrl(item.image_url)" 
+                 loading="lazy"
+                 class="w-full h-full object-cover transition-all" 
+                 :class="getItemTier(item) === 'critical' ? 'opacity-30 grayscale filter contrast-125' : (getItemTier(item) === 'boundary' ? 'opacity-75' : '')" 
+                 :alt="item.name">
 
-          <div class="flex items-end space-x-2 mb-4">
-            <span class="text-3xl font-semibold tabular-nums text-slate-900">₱{{ item.current_price.toFixed(2) }}</span>
-            <span v-if="isClearance(item)" class="text-sm font-semibold tabular-nums line-through text-slate-400 mb-1">₱{{ item.base_price }}</span>
+            <!-- Dim Overlay Badge for Critical Allergens -->
+            <div v-if="getItemTier(item) === 'critical'" class="absolute inset-0 flex items-center justify-center bg-rose-950/20 pointer-events-none">
+              <span class="bg-rose-600/95 text-white text-[11px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm flex items-center gap-1 border border-rose-400">
+                <AlertTriangle :size="13" /> Allergen Restricted
+              </span>
+            </div>
+
+            <div v-if="isClearance(item)" class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg animate-pulse flex items-center">
+              <Clock :size="14" class="mr-1" />
+              {{ calculateDiscountPercent(item) }}% OFF (Surplus Decay)
+            </div>
           </div>
 
-          <div v-if="getMatches(item).length" class="mt-2 flex flex-wrap gap-1">
-            <span v-for="tag in getMatches(item)" :key="tag" class="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
-              <template v-if="tag.startsWith('Watchlist:')">
-                Matches {{ tag }}
-              </template>
+          <div class="p-5 flex-1 flex flex-col">
+            <h3 class="text-lg font-semibold text-slate-900 mb-1">{{ item.name }}</h3>
+            <p class="text-sm text-slate-600 mb-3">{{ item.description }}</p>
+            
+            <div v-if="item.macros && item.macros.calories" class="mb-2">
+              <div class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded inline-block border border-slate-200">
+                Est. {{ item.macros.calories }} kcal • {{ item.macros.protein_g }}g Pro • {{ item.macros.carbs_g }}g Carbs • {{ item.macros.fat_g }}g Fat • {{ item.macros.sodium_mg }}mg Sod
+              </div>
+            </div>
+            
+            <div v-if="item.ingredients && item.ingredients.length" class="mb-3">
+              <p class="text-[11px] text-slate-500 line-clamp-2 leading-snug">
+                <span class="font-semibold text-slate-700">Ingredients:</span> {{ item.ingredients.join(', ') }}
+              </p>
+            </div>
+            
+            <div class="flex-1"></div>
+
+            <div class="flex items-end space-x-2 mb-4">
+              <span class="text-3xl font-semibold tabular-nums text-slate-900">₱{{ item.current_price.toFixed(2) }}</span>
+              <span v-if="isClearance(item)" class="text-sm font-semibold tabular-nums line-through text-slate-400 mb-1">₱{{ item.base_price }}</span>
+            </div>
+
+            <div v-if="getMatches(item).length" class="mt-2 flex flex-wrap gap-1">
+              <span v-for="tag in getMatches(item)" :key="tag" class="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
+                <template v-if="tag.startsWith('Watchlist:')">
+                  Matches {{ tag }}
+                </template>
+                <template v-else>
+                  Contains: {{ tag }}
+                </template>
+              </span>
+            </div>
+
+            <div class="mb-5 flex flex-wrap gap-1.5 items-center">
+              <span v-if="getItemTier(item) === 'boundary'" class="inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full shadow-xs">
+                <Info :size="12" class="text-amber-600" /> Dietary Conflict
+              </span>
+              <span v-if="(!item.critical_allergens?.length && !item.allergens?.length) && (!item.digestive_sensitivities?.length && !item.sensitivities?.length)" class="inline-flex items-center bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
+                Safe / No Common Allergens
+              </span>
               <template v-else>
-                Contains: {{ tag }}
+                <span v-for="a in (item.critical_allergens || item.allergens || [])" :key="'c-'+a" class="inline-flex items-center bg-rose-50 text-rose-700 border border-rose-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
+                  <AlertTriangle :size="14" class="text-rose-600 inline mr-1" /> {{ a }}
+                </span>
+                <span v-for="s in (item.digestive_sensitivities || item.sensitivities || [])" :key="'s-'+s" class="inline-flex items-center bg-amber-50 text-amber-700 border border-amber-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
+                   {{ s }}
+                </span>
               </template>
-            </span>
-          </div>
+            </div>
 
-          <div class="mb-5 flex flex-wrap gap-1.5">
-            <span v-if="(!item.critical_allergens?.length && !item.allergens?.length) && (!item.digestive_sensitivities?.length && !item.sensitivities?.length)" class="inline-flex items-center bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
-              Safe / No Common Allergens
-            </span>
-            <template v-else>
-              <span v-for="a in (item.critical_allergens || item.allergens || [])" :key="'c-'+a" class="inline-flex items-center bg-rose-50 text-rose-700 border border-rose-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
-                <AlertTriangle :size="14" class="text-rose-600 inline mr-1" /> {{ a }}
-              </span>
-              <span v-for="s in (item.digestive_sensitivities || item.sensitivities || [])" :key="'s-'+s" class="inline-flex items-center bg-amber-50 text-amber-700 border border-amber-200 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
-                 {{ s }}
-              </span>
-            </template>
+            <button @click="handleDishButtonClick(item)" class="w-full font-bold py-3 rounded-lg transition-all shadow-sm flex items-center justify-center" 
+                    :class="[
+                      item.stock <= 0 
+                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                        : (getItemTier(item) === 'critical' 
+                            ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-200 shadow-md ring-2 ring-rose-500/30' 
+                            : 'bg-emerald-600 text-white hover:bg-emerald-700')
+                    ]"
+                    :disabled="item.stock <= 0">
+              <template v-if="item.stock <= 0">Sold Out</template>
+              <template v-else-if="getItemTier(item) === 'critical'">
+                <AlertTriangle :size="16" class="mr-1.5 text-rose-100" /> Review Allergen Warning
+              </template>
+              <template v-else>Add to Plate</template>
+            </button>
           </div>
-
-          <button @click="openItemModal(item)" class="w-full font-bold py-3 rounded-lg transition-all shadow-sm flex items-center justify-center" 
-                  :class="[
-                    item.stock <= 0 
-                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
-                      : (getDietaryConflicts(item).hasCriticalAllergen 
-                          ? 'bg-rose-50 border-2 border-rose-300 text-rose-700 hover:bg-rose-100' 
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700')
-                  ]"
-                  :disabled="item.stock <= 0">
-            <template v-if="item.stock <= 0">Sold Out</template>
-            <template v-else-if="getDietaryConflicts(item).hasCriticalAllergen">
-              <AlertTriangle :size="16" class="mr-1.5 text-rose-600" /> Review Allergen Warning
-            </template>
-            <template v-else>Select Options</template>
-          </button>
         </div>
-      </div>
+      </template>
     </div>
     </template>
 
@@ -544,14 +564,23 @@
             <span class="text-emerald-600 tabular-nums">₱{{ cartTotal.toFixed(2) }}</span>
           </div>
 
-          <div v-if="userDangerMatches.length > 0" class="bg-red-50 border border-red-300 text-red-900 p-3 mb-4 rounded-lg flex flex-col shadow-sm">
-            <div class="flex items-start font-bold mb-2 text-sm leading-tight">
-              <AlertTriangle :size="16" class="mr-2 text-red-600 flex-shrink-0" />
-              <span>CRITICAL ALLERGEN ALERT: Plate contains severe allergens: {{ userDangerMatches.join(', ') }}</span>
+          <!-- Red Warning Banner when plateHasAllergen is true -->
+          <div v-if="plateHasAllergen" class="bg-rose-50 border-2 border-rose-400 text-rose-950 p-4 mb-4 rounded-xl flex flex-col shadow-sm">
+            <div class="flex items-start font-bold mb-2 text-sm leading-tight text-rose-900">
+              <AlertTriangle :size="18" class="mr-2 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <span class="uppercase font-black text-xs text-rose-700 block">Critical Allergen Warning</span>
+                <span>Plate contains dishes with designated medical allergens: <strong class="underline">{{ cartCriticalAllergenNames.join(', ') || 'Medical Allergens' }}</strong></span>
+              </div>
             </div>
-            <label class="flex items-center space-x-2 text-xs cursor-pointer mt-1 pl-1">
-              <input type="checkbox" v-model="dangerAcknowledged" class="rounded text-red-600 focus:ring-red-500 w-4 h-4 cursor-pointer">
-              <span class="font-semibold text-red-800">I understand this meal contains my designated medical allergen.</span>
+            <p class="text-xs text-rose-800 mb-2.5 leading-relaxed">
+              Consuming dishes with your medical allergens poses severe health hazards. You must explicitly consent before checking out.
+            </p>
+            <label class="flex items-start space-x-2.5 text-xs cursor-pointer p-2.5 bg-white/80 border border-rose-300 rounded-lg select-none">
+              <input type="checkbox" v-model="allergenOverrideConsent" class="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer mt-0.5">
+              <span class="font-bold text-rose-950 leading-snug">
+                I understand this meal contains my designated medical allergen and I accept full responsibility.
+              </span>
             </label>
           </div>
           <div v-else-if="userCautionMatches.length > 0" class="bg-yellow-50 border border-yellow-300 text-yellow-800 p-3 mb-4 rounded-lg flex items-start shadow-sm">
@@ -560,8 +589,8 @@
           </div>
 
           <button @click="initiateCheckout" class="w-full font-bold py-3.5 rounded-xl shadow-md transition-transform flex justify-center items-center text-lg" 
-                  :class="(cart.length === 0 || (userDangerMatches.length > 0 && !dangerAcknowledged)) ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95'"
-                  :disabled="cart.length === 0 || (userDangerMatches.length > 0 && !dangerAcknowledged)">
+                  :class="(cart.length === 0 || (plateHasAllergen && !allergenOverrideConsent)) ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none' : 'bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95'"
+                  :disabled="cart.length === 0 || (plateHasAllergen && !allergenOverrideConsent)">
             Finalize Order
           </button>
         </div>
@@ -589,6 +618,26 @@
           <div v-if="checkoutError" class="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-lg text-sm font-medium flex items-start gap-2 shadow-sm">
             <AlertTriangle :size="16" class="shrink-0 mt-0.5" />
             <span>{{ checkoutError }}</span>
+          </div>
+
+          <!-- Red Warning Banner inside checkout drawer if plateHasAllergen is true -->
+          <div v-if="plateHasAllergen" class="bg-rose-50 border-2 border-rose-400 text-rose-950 p-4 rounded-xl flex flex-col shadow-sm">
+            <div class="flex items-start font-bold mb-2 text-sm leading-tight text-rose-900">
+              <AlertTriangle :size="18" class="mr-2 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <span class="uppercase font-black text-xs text-rose-700 block">Critical Allergen Warning</span>
+                <span>Plate contains dishes with designated medical allergens: <strong class="underline">{{ cartCriticalAllergenNames.join(', ') || 'Medical Allergens' }}</strong></span>
+              </div>
+            </div>
+            <p class="text-xs text-rose-800 mb-2.5 leading-relaxed">
+              Consuming dishes with your medical allergens poses severe health hazards. You must explicitly consent before checking out.
+            </p>
+            <label class="flex items-start space-x-2.5 text-xs cursor-pointer p-2.5 bg-white/80 border border-rose-300 rounded-lg select-none">
+              <input type="checkbox" v-model="allergenOverrideConsent" class="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer mt-0.5">
+              <span class="font-bold text-rose-950 leading-snug">
+                I understand this meal contains my designated medical allergen and I accept full responsibility.
+              </span>
+            </label>
           </div>
 
           <!-- Pre-Order & Pay (PayMongo) -->
@@ -626,7 +675,9 @@
             <span class="text-2xl font-black text-emerald-600 tabular-nums">₱{{ cartTotal.toFixed(2) }}</span>
           </div>
           <button @click="processOrder(paymentMethod === 'paymongo' ? 'express' : 'inline')" 
-                  class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-base">
+                  class="w-full font-bold py-3.5 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-base"
+                  :class="(cart.length === 0 || (plateHasAllergen && !allergenOverrideConsent)) ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none pointer-events-none' : 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-95'"
+                  :disabled="cart.length === 0 || (plateHasAllergen && !allergenOverrideConsent)">
             <CreditCard v-if="paymentMethod === 'paymongo'" :size="18" />
             <Utensils v-else :size="18" />
             <span>{{ paymentMethod === 'paymongo' ? 'Pay Online with PayMongo' : 'Confirm Order & Pay with Cash' }}</span>
@@ -719,6 +770,66 @@
         </div>
       </div>
     </transition>
+
+    <!-- Allergen Warning Center Modal (Standard Center Modal, NOT a side drawer) -->
+    <transition enter-active-class="transition-opacity duration-200" leave-active-class="transition-opacity duration-150" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="allergenWarningModalOpen" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" @click.self="closeAllergenWarningModal">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-rose-200">
+          <!-- Modal Header -->
+          <div class="bg-rose-600 px-6 py-5 text-white flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="p-2 bg-white/20 rounded-xl">
+                <AlertTriangle :size="24" class="text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-black tracking-tight leading-tight">Critical Medical Allergen Warning</h3>
+                <p class="text-xs text-rose-100 font-medium">Dietary Safety Alert</p>
+              </div>
+            </div>
+            <button @click="closeAllergenWarningModal" class="p-1.5 rounded-full hover:bg-white/20 text-white/80 hover:text-white transition-colors">
+              <X :size="20" />
+            </button>
+          </div>
+
+          <!-- Modal Body -->
+          <div class="p-6 space-y-4">
+            <div class="bg-rose-50 border border-rose-200 rounded-xl p-4">
+              <div class="text-xs font-black uppercase text-rose-800 tracking-wider mb-1">High Medical Risk</div>
+              <p class="text-sm font-semibold text-rose-950 leading-relaxed">
+                <strong class="font-bold underline">{{ allergenWarningDish?.name }}</strong> contains ingredients mapped to your registered medical allergen:
+              </p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <span v-for="allergen in offendingAllergenNames" :key="allergen" 
+                      class="inline-flex items-center gap-1.5 bg-rose-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">
+                  <AlertTriangle :size="13" /> {{ allergen }}
+                </span>
+              </div>
+            </div>
+
+            <p class="text-xs text-slate-600 leading-relaxed">
+              Consuming dishes containing your critical allergens can cause severe adverse reactions, anaphylaxis, or medical emergencies. OptiMeal strongly advises against ordering this dish.
+            </p>
+
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-500">
+              <span class="font-bold text-slate-700">Consent Note:</span> Adding this dish to your plate requires explicit consent acknowledging you understand the health risks.
+            </div>
+          </div>
+
+          <!-- Modal Actions -->
+          <div class="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row-reverse gap-2.5">
+            <button @click="confirmAddAllergenDish" 
+                    class="w-full sm:w-auto flex-1 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-sm">
+              <AlertTriangle :size="16" />
+              <span>I understand, add to plate</span>
+            </button>
+            <button @click="closeAllergenWarningModal" 
+                    class="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold text-sm transition-colors text-center">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -783,7 +894,11 @@ watch(cart, (newItems) => {
   }))
 }, { deep: true })
 
-const dangerAcknowledged = ref(false)
+const allergenOverrideConsent = ref(false)
+const dangerAcknowledged = allergenOverrideConsent // Backwards compatibility alias
+const allergenWarningModalOpen = ref(false)
+const allergenWarningDish = ref(null)
+const trackedOverriddenAllergenIds = ref(new Set())
 const studentProfile = ref(null)
 const dishRiskOverride = ref(false)
 const categories = ['All', 'Sabaw / Soup', 'Ulam / Stews', 'Prito / Fried', 'Gulay & Veg', 'Dessert / Snacks']
@@ -980,6 +1095,63 @@ onMounted(() => {
   }, 1000)
 })
 
+const ALLERGEN_NAME_TO_ID = {
+  'peanuts': 1,
+  'peanut': 1,
+  'shellfish / crustaceans': 2,
+  'shellfish': 2,
+  'crustaceans': 2,
+  'shrimp': 2,
+  'crab': 2,
+  'prawn': 2,
+  'shrimp paste (bagoong)': 3,
+  'shrimp paste': 3,
+  'bagoong': 3,
+  'alamang': 3,
+  'eggs': 4,
+  'egg': 4,
+  'dairy': 5,
+  'milk': 5,
+  'cheese': 5,
+  'butter': 5,
+  'tree nuts': 6,
+  'tree nut': 6,
+  'nuts': 6,
+  'nut': 6,
+  'soy': 7,
+  'soya': 7,
+  'soy sauce': 7,
+  'tofu': 7,
+  'fish': 8,
+  'wheat/gluten': 9,
+  'wheat': 9,
+  'gluten': 9,
+  'flour': 9,
+  'sesame': 10,
+  'sesame oil': 10
+}
+
+const getAllergenIdByName = (name) => {
+  if (!name || typeof name !== 'string') return null
+  const norm = name.toLowerCase().trim()
+  if (ALLERGEN_NAME_TO_ID[norm]) return ALLERGEN_NAME_TO_ID[norm]
+  for (const [key, id] of Object.entries(ALLERGEN_NAME_TO_ID)) {
+    if (norm.includes(key) || key.includes(norm)) {
+      return id
+    }
+  }
+  return null
+}
+
+const getItemTier = (item) => {
+  if (!item) return 'safe'
+  if (item.conflict_tier) return item.conflict_tier
+  const conflicts = getDietaryConflicts(item)
+  if (conflicts.hasCriticalAllergen) return 'critical'
+  if (conflicts.hasSensitivity || conflicts.hasConflict) return 'boundary'
+  return 'safe'
+}
+
 const displayDishes = computed(() => {
   let list = menuItems.value;
   if (selectedCategory.value && selectedCategory.value !== 'All') {
@@ -993,13 +1165,67 @@ const displayDishes = computed(() => {
       return item.macros.calories <= maxCalories.value;
     });
   }
+  const tierWeight = { safe: 1, boundary: 2, critical: 3 };
   return [...list].sort((a, b) => {
-    const aConflicts = getMatches(a).length > 0;
-    const bConflicts = getMatches(b).length > 0;
-    if (aConflicts && !bConflicts) return 1;
-    if (!aConflicts && bConflicts) return -1;
+    const tierA = tierWeight[getItemTier(a)] || 1;
+    const tierB = tierWeight[getItemTier(b)] || 1;
+    if (tierA !== tierB) return tierA - tierB;
     return 0;
   });
+})
+
+const firstCriticalIndex = computed(() => {
+  return displayDishes.value.findIndex(item => getItemTier(item) === 'critical')
+})
+
+const plateHasAllergen = computed(() => {
+  return cart.value.some(c => (c.item && (c.item.conflict_tier === 'critical' || getItemTier(c.item) === 'critical')))
+})
+
+watch(plateHasAllergen, (hasAllergen) => {
+  if (!hasAllergen) {
+    allergenOverrideConsent.value = false
+  }
+})
+
+const cartCriticalAllergenNames = computed(() => {
+  const set = new Set()
+  cart.value.forEach(c => {
+    if (c.item && (c.item.conflict_tier === 'critical' || getItemTier(c.item) === 'critical')) {
+      const conflicts = getDietaryConflicts(c.item)
+      const names = conflicts.criticalAllergens.length > 0
+        ? conflicts.criticalAllergens
+        : (c.item.critical_allergens || c.item.allergens || [])
+      names.forEach(n => set.add(n))
+    }
+  })
+  return Array.from(set)
+})
+
+const overriddenAllergenIds = computed(() => {
+  if (!plateHasAllergen.value) return []
+  const ids = new Set()
+  cart.value.forEach(c => {
+    if (c.item && (c.item.conflict_tier === 'critical' || getItemTier(c.item) === 'critical')) {
+      const conflicts = getDietaryConflicts(c.item)
+      const names = conflicts.criticalAllergens.length > 0
+        ? conflicts.criticalAllergens
+        : (c.item.critical_allergens || c.item.allergens || [])
+      names.forEach(name => {
+        const id = getAllergenIdByName(name)
+        if (id) ids.add(id)
+      })
+      if (Array.isArray(c.item.critical_allergen_ids)) {
+        c.item.critical_allergen_ids.forEach(id => {
+          if (typeof id === 'number' && id > 0) ids.add(id)
+        })
+      }
+    }
+  })
+  trackedOverriddenAllergenIds.value.forEach(id => {
+    if (plateHasAllergen.value) ids.add(id)
+  })
+  return Array.from(ids)
 })
 
 const cartSubtotal = computed(() => {
@@ -1312,13 +1538,74 @@ const userCautionMatches = computed(() => {
   return Array.from(set)
 })
 
+const offendingAllergenNames = computed(() => {
+  if (!allergenWarningDish.value) return []
+  const conflicts = getDietaryConflicts(allergenWarningDish.value)
+  if (conflicts.criticalAllergens && conflicts.criticalAllergens.length > 0) {
+    return conflicts.criticalAllergens
+  }
+  return allergenWarningDish.value.critical_allergens || allergenWarningDish.value.allergens || ['Designated Medical Allergen']
+})
+
+const openAllergenWarningModal = (item) => {
+  allergenWarningDish.value = item
+  allergenWarningModalOpen.value = true
+}
+
+const closeAllergenWarningModal = () => {
+  allergenWarningModalOpen.value = false
+  allergenWarningDish.value = null
+}
+
+const confirmAddAllergenDish = () => {
+  if (!allergenWarningDish.value || allergenWarningDish.value.stock <= 0) return
+  const itemToAdd = { ...allergenWarningDish.value, conflict_tier: 'critical' }
+
+  // Track offending allergen IDs
+  const dishConflicts = getDietaryConflicts(itemToAdd)
+  const names = dishConflicts.criticalAllergens.length > 0
+    ? dishConflicts.criticalAllergens
+    : (itemToAdd.critical_allergens || itemToAdd.allergens || [])
+  names.forEach(name => {
+    const id = getAllergenIdByName(name)
+    if (id) trackedOverriddenAllergenIds.value.add(id)
+  })
+
+  // Add to cart
+  const existingIndex = cart.value.findIndex(c => c.item.id === itemToAdd.id)
+  if (existingIndex > -1) {
+    cart.value[existingIndex].quantity += 1
+  } else {
+    cart.value.push({
+      item: itemToAdd,
+      quantity: 1,
+      preference: 'no_preference'
+    })
+  }
+
+  ttlSeconds.value = 1800
+  closeAllergenWarningModal()
+  if (selectedItem.value && selectedItem.value.id === itemToAdd.id) {
+    selectedItem.value = null
+  }
+  showPlateDrawer.value = true
+}
+
+const handleDishButtonClick = (item) => {
+  if (getItemTier(item) === 'critical') {
+    openAllergenWarningModal(item)
+  } else {
+    openItemModal(item)
+  }
+}
+
 const initiateCheckout = () => {
   if (!localStorage.getItem('optimeal_user')) {
     router.push('/customer/login')
     return
   }
   
-  if (userDangerMatches.value.length > 0 && !dangerAcknowledged.value) {
+  if (plateHasAllergen.value && !allergenOverrideConsent.value) {
     return // Block if not checked, although the button is already disabled
   } else {
     proceedToCheckout()
@@ -1338,6 +1625,11 @@ const processOrder = async (type) => {
   // Validate pickup time slot if take out
   if (orderType.value === 'take_out' && !selectedPickupSlot.value) {
     checkoutError.value = 'Please select a pickup time slot for take-out orders.'
+    return
+  }
+
+  if (plateHasAllergen.value && !allergenOverrideConsent.value) {
+    checkoutError.value = 'Please acknowledge and consent to the allergen warning to proceed.'
     return
   }
   
@@ -1363,7 +1655,8 @@ const processOrder = async (type) => {
         fulfillment_type: orderType.value,
         pickup_time: orderType.value === 'take_out' ? selectedPickupSlot.value : null,
         payment_method: paymentMethod.value,
-        allergen_override: Boolean(dangerAcknowledged.value),
+        allergen_override: Boolean(allergenOverrideConsent.value),
+        overridden_allergen_ids: overriddenAllergenIds.value,
         items: cart.value.map(c => ({
           menu_item_id: c.item.id,
           quantity: c.quantity,

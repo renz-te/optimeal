@@ -655,3 +655,47 @@ function handleGetDashboardMetrics($pdo)
         jsonResponse(['error' => 'Failed to calculate metrics due to an internal server error.'], 500);
     }
 }
+
+function handleGetAllergenOverrides($pdo)
+{
+    try {
+        $stmt = $pdo->query("
+            SELECT 
+                ao.id,
+                ao.user_id,
+                ao.order_id,
+                ao.allergen_id,
+                ao.created_at,
+                u.name AS student_name,
+                u.email AS student_email,
+                ca.name AS allergen_name,
+                o.total_amount,
+                o.status AS order_status,
+                o.reserved_at,
+                o.pickup_time
+            FROM allergen_overrides ao
+            JOIN users u ON ao.user_id = u.id
+            LEFT JOIN critical_allergens ca ON ao.allergen_id = ca.id
+            LEFT JOIN orders o ON ao.order_id = o.id
+            ORDER BY ao.created_at DESC
+        ");
+        $overrides = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($overrides as &$row) {
+            $row['id'] = (int)$row['id'];
+            $row['user_id'] = (int)$row['user_id'];
+            $row['order_id'] = (int)$row['order_id'];
+            $row['allergen_id'] = (int)$row['allergen_id'];
+            if ($row['total_amount'] !== null) {
+                $row['total_amount'] = (float)$row['total_amount'];
+            }
+        }
+        unset($row);
+
+        jsonResponse($overrides);
+    } catch (Exception $e) {
+        error_log("handleGetAllergenOverrides error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to fetch allergen overrides due to an internal server error.'], 500);
+    }
+}
+

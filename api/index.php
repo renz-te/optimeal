@@ -246,6 +246,10 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleGetDashboardMetrics($pdo);
+} elseif (($route === '/admin/allergen-overrides' || $route === '/api/admin/allergen-overrides') && $method === 'GET') {
+    requireRole($pdo, ['admin']);
+    require 'routes/admin.php';
+    handleGetAllergenOverrides($pdo);
 } elseif ($route === '/announcement' && $method === 'GET') {
     require 'routes/admin.php';
     handleGetAnnouncement($pdo);
