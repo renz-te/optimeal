@@ -32,6 +32,7 @@ const routes = [
       { path: 'dashboard', component: VendorDashboard },
       { path: 'orders', component: () => import('../views/vendor/Orders.vue') },
       { path: 'roster', name: 'VendorRoster', component: () => import('../views/vendor/DailyRoster.vue') },
+      { path: 'prep-plan', name: 'VendorPrepPlan', component: () => import('../views/vendor/PrepPlan.vue') },
       { path: 'catalog', redirect: '/vendor/roster' },
       { path: 'prices', name: 'VendorPrices', component: () => import('../views/vendor/IngredientPrices.vue') },
       { path: 'decay', component: () => import('../views/vendor/DecayRules.vue') },

@@ -3097,5 +3097,91 @@ function handleCreateBatch($pdo, $input = null)
     }
 }
 
+function handleDiscardBatch($pdo, $batchId)
+{
+    $store_id = requireVendor($pdo);
+    $batchId = (int)$batchId;
+    if ($batchId <= 0) {
+        jsonResponse(['error' => 'Invalid batch ID'], 400);
+        return;
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        // Lock and verify ownership of batch via menu_items
+        $stmt = $pdo->prepare("
+            SELECT b.id, b.menu_item_id, b.remaining_stock, b.state, COALESCE(b.status, b.state) as status, m.name as dish_name
+            FROM batches b
+            JOIN menu_items m ON b.menu_item_id = m.id
+            WHERE b.id = ? AND m.store_id = ?
+            FOR UPDATE
+        ");
+        $stmt->execute([$batchId, $store_id]);
+        $batch = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$batch) {
+            $pdo->rollBack();
+            jsonResponse(['error' => 'Batch not found or does not belong to your store'], 404);
+            return;
+        }
+
+        if ($batch['state'] === 'discarded' || $batch['status'] === 'discarded') {
+            $pdo->rollBack();
+            jsonResponse(['error' => 'Batch is already marked as discarded'], 400);
+            return;
+        }
+
+        $discardedQty = (int)$batch['remaining_stock'];
+
+        // Requirement: set status = 'discarded', setting discarded_qty = remaining_stock, and zeroing out remaining_stock
+        $stmtUpdate = $pdo->prepare("
+            UPDATE batches
+            SET status = 'discarded',
+                state = 'discarded',
+                discarded_qty = remaining_stock,
+                remaining_stock = 0,
+                updated_at = NOW()
+            WHERE id = ?
+        ");
+        $stmtUpdate->execute([$batchId]);
+
+        // Decrement online_pool_qty in inventory if active
+        if ($discardedQty > 0) {
+            $stmtInv = $pdo->prepare("
+                UPDATE inventory
+                SET online_pool_qty = GREATEST(0, online_pool_qty - ?),
+                    delisted_from_app = CASE WHEN GREATEST(0, online_pool_qty - ?) <= critical_stock_threshold THEN 1 ELSE delisted_from_app END
+                WHERE menu_item_id = ?
+            ");
+            $stmtInv->execute([$discardedQty, $discardedQty, $batch['menu_item_id']]);
+        }
+
+        $pdo->commit();
+
+        jsonResponse([
+            'status' => 'success',
+            'message' => "Batch #$batchId successfully marked as discarded ({$discardedQty} portions discarded).",
+            'batch' => [
+                'id' => $batchId,
+                'menu_item_id' => (int)$batch['menu_item_id'],
+                'dish_name' => $batch['dish_name'],
+                'status' => 'discarded',
+                'state' => 'discarded',
+                'discarded_qty' => $discardedQty,
+                'remaining_stock' => 0
+            ]
+        ], 200);
+
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleDiscardBatch error: " . $e->getMessage());
+        jsonResponse(['error' => 'Failed to discard batch: ' . $e->getMessage()], 500);
+    }
+}
+
+
 
 

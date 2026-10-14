@@ -196,6 +196,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif (($route === '/vendor/batches' || $route === '/api/vendor/batches') && $method === 'GET') {
     require 'routes/vendor.php';
     handleGetBatches($pdo);
+} elseif (preg_match('#^/(?:api/)?vendor/batches/(\d+)/discard$#', $route, $matches) && in_array($method, ['PATCH', 'POST'])) {
+    require 'routes/vendor.php';
+    handleDiscardBatch($pdo, (int)$matches[1]);
 } elseif ($route === '/vendor/audit' && $method === 'GET') {
     requireStaff($pdo);
     require 'routes/vendor.php';

@@ -155,6 +155,21 @@
                         <span class="text-emerald-600 font-normal">Available:</span>
                         <strong class="font-bold">{{ Math.max(0, Number(b.remaining_stock) - Number(b.held_stock || 0)) }}</strong>
                       </span>
+
+                      <!-- Discard Action Button -->
+                      <button
+                        v-if="b.state !== 'discarded' && Number(b.remaining_stock) > 0"
+                        @click.stop="openDiscardModal(b, item)"
+                        type="button"
+                        title="Discard remaining portions from batch"
+                        class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors"
+                      >
+                        <Trash2 :size="12" class="text-rose-600" />
+                        <span>Discard Remaining</span>
+                      </button>
+                      <span v-else-if="b.state === 'discarded'" class="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 italic">
+                        Discarded ({{ b.discarded_qty || 0 }} loss)
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -723,6 +738,36 @@
             </div>
           </div>
 
+          <!-- COG vs Revenue Financial Margin Card -->
+          <div class="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-4 rounded-xl border border-slate-700 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                <BarChart3 :size="14" />
+                <span>Batch Financial Summary (COG vs. Projected Revenue)</span>
+              </div>
+              <router-link to="/vendor/prep-plan" class="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 underline">
+                View Full Margin Analysis &rarr;
+              </router-link>
+            </div>
+            <div class="grid grid-cols-3 gap-3 text-center">
+              <div class="bg-white/10 p-2.5 rounded-lg">
+                <div class="text-[10px] text-slate-300 font-bold uppercase">Estimated COG</div>
+                <div class="text-base font-black text-white mt-0.5">₱{{ Number(prepPlanData.grand_total || 0).toFixed(2) }}</div>
+              </div>
+              <div class="bg-white/10 p-2.5 rounded-lg">
+                <div class="text-[10px] text-slate-300 font-bold uppercase">Projected Revenue</div>
+                <div class="text-base font-black text-emerald-400 mt-0.5">₱{{ Number(projectedPrepRevenue).toFixed(2) }}</div>
+              </div>
+              <div class="bg-white/10 p-2.5 rounded-lg">
+                <div class="text-[10px] text-slate-300 font-bold uppercase">Net Rescued Margin</div>
+                <div class="text-base font-black text-teal-300 mt-0.5">+₱{{ Math.max(0, Number(projectedPrepRevenue) - Number(prepPlanData.grand_total || 0)).toFixed(2) }}</div>
+              </div>
+            </div>
+            <p class="text-[11px] text-slate-300">
+              <strong class="text-white">Waste Mitigation:</strong> Discarding surplus results in a 100% loss of raw Cost of Goods (COG). Rescuing dishes via afternoon discount recovers 100% of ingredient costs.
+            </p>
+          </div>
+
           <!-- Dishes with Reservations Exceeding Plan Warning Banner (R2 & R3) -->
           <div v-if="dishesExceedingPlan.length > 0" class="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
             <div class="flex items-center gap-2 text-xs font-bold text-rose-800 uppercase tracking-wide">
@@ -1041,12 +1086,63 @@
         </div>
       </div>
     </transition>
+
+    <!-- Discard Confirmation Modal -->
+    <transition enter-active-class="transition-opacity duration-200" leave-active-class="transition-opacity duration-200" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="showDiscardModal" class="fixed inset-0 bg-slate-900/60 z-50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-rose-100 overflow-hidden transform transition-all p-6 space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+              <AlertTriangle :size="20" />
+            </div>
+            <div>
+              <h3 class="text-lg font-black text-slate-900">Discard Remaining Stock</h3>
+              <p class="text-xs text-slate-500">Batch #{{ batchToDiscard?.id }} ({{ dishForDiscard?.name }})</p>
+            </div>
+          </div>
+
+          <div class="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs text-rose-900">
+            <p class="font-bold flex items-center gap-1.5 text-rose-800">
+              <AlertCircle :size="14" class="text-rose-600 shrink-0" />
+              <span>Permanent Financial Loss Warning</span>
+            </p>
+            <p>
+              Discarding logs a permanent financial loss. Once discarded, all 
+              <strong class="font-black text-rose-950">{{ batchToDiscard?.remaining_stock }}</strong> remaining portion(s) 
+              will be permanently written off, zeroed out from available inventory, and cannot be recovered or sold.
+            </p>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              @click="closeDiscardModal"
+              :disabled="discarding"
+              class="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              id="confirm-discard-btn"
+              type="button"
+              @click="submitDiscardBatch"
+              :disabled="discarding"
+              class="px-5 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold rounded-lg transition-all shadow flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <span v-if="discarding" class="animate-spin w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full"></span>
+              <Trash2 v-else :size="14" />
+              <span>{{ discarding ? 'Discarding...' : `Discard ${batchToDiscard?.remaining_stock} Portions` }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, reactive, watch, computed } from 'vue'
-import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2, Camera, UploadCloud, Flame, Clock } from 'lucide-vue-next'
+import { Plus, Edit2, X, Utensils, ClipboardList, Sparkles, Trash2, AlertTriangle, Check, Shield, Rocket, Lock, BarChart3, Loader2, Camera, UploadCloud, Flame, Clock, AlertCircle } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useCatalog } from '../../stores/dishCatalog'
 import { useSandbox } from '../../stores/sandbox'
@@ -1162,6 +1258,78 @@ const showToast = (message, type = 'success') => {
     toast.value.show = false
   }, 3000)
 }
+
+// Discard Confirmation Modal State
+const showDiscardModal = ref(false)
+const batchToDiscard = ref(null)
+const dishForDiscard = ref(null)
+const discarding = ref(false)
+
+const openDiscardModal = (batch, dish) => {
+  batchToDiscard.value = batch
+  dishForDiscard.value = dish
+  showDiscardModal.value = true
+}
+
+const closeDiscardModal = () => {
+  showDiscardModal.value = false
+  batchToDiscard.value = null
+  dishForDiscard.value = null
+  discarding.value = false
+}
+
+const submitDiscardBatch = async () => {
+  if (!batchToDiscard.value || !dishForDiscard.value) return
+  discarding.value = true
+  const batchId = batchToDiscard.value.id
+  const targetDish = dishForDiscard.value
+  const discardedUnits = Number(batchToDiscard.value.remaining_stock || 0)
+
+  try {
+    const res = await fetch(`/api/vendor/batches/${batchId}/discard`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      showToast(data.error || 'Failed to discard batch', 'error')
+      return
+    }
+
+    // Reactively update batch state in UI without reload
+    if (targetDish.batches) {
+      const idx = targetDish.batches.findIndex(b => b.id === batchId)
+      if (idx !== -1) {
+        targetDish.batches[idx].remaining_stock = 0
+        targetDish.batches[idx].discarded_qty = data.batch?.discarded_qty || discardedUnits
+        targetDish.batches[idx].state = 'discarded'
+        targetDish.batches[idx].status = 'discarded'
+      }
+      targetDish.stock = targetDish.batches
+        .filter(b => b.state !== 'discarded')
+        .reduce((sum, b) => sum + Number(b.remaining_stock || 0), 0)
+    }
+
+    showToast(`Batch #${batchId} discarded (${discardedUnits} portions logged as loss).`, 'success')
+    closeDiscardModal()
+    fetchBatches()
+  } catch (err) {
+    showToast('Network error while discarding batch', 'error')
+  } finally {
+    discarding.value = false
+  }
+}
+
+// Projected Revenue for Prep Plan Margin Math
+const projectedPrepRevenue = computed(() => {
+  if (!prepPlanData.value.dishes) return 0
+  return prepPlanData.value.dishes.reduce((sum, d) => {
+    const dishObj = masterCatalog.value.find(m => m.id === d.menu_item_id)
+    const price = Number(dishObj?.current_price ?? (dishObj?.base_price ?? 0))
+    const cookServings = Number(d.cook_servings || 0)
+    return sum + (price * cookServings)
+  }, 0)
+})
 
 const categories = ['Sabaw / Soup', 'Ulam / Stews', 'Prito / Fried', 'Gulay & Veg', 'Dessert / Snacks']
 
