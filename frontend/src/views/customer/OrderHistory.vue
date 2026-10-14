@@ -134,48 +134,52 @@
                 </div>
               </div>
 
-              <!-- Prominent Claim Token & QR Placeholder Section -->
-              <div class="mt-5 p-4 sm:p-5 bg-gradient-to-br from-emerald-50 via-teal-50 to-slate-50 border border-emerald-100 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div class="text-center sm:text-left flex-1">
-                  <div class="text-xs font-bold text-emerald-700 uppercase tracking-wider flex items-center justify-center sm:justify-start gap-1">
-                    <KeyRound :size="14" />
-                    <span>Physical Pickup Token</span>
-                  </div>
-                  <div class="text-4xl sm:text-5xl font-black text-slate-900 tracking-wider font-mono mt-1 select-all">
-                    #{{ order.claim_token }}
-                  </div>
-                  <p class="text-xs text-emerald-800/80 mt-1 font-medium">
-                    Show this number or let staff scan the code
-                  </p>
+              <!-- Prominent Centered Typography Block for Claim Token -->
+              <!-- // Vendor-side QR scanner deferred to Phase 2. -->
+              <div class="mt-5 p-5 bg-gradient-to-br from-emerald-50/70 via-white to-slate-50 border border-emerald-100 rounded-2xl text-center shadow-xs">
+                <div class="text-[11px] font-extrabold uppercase tracking-widest text-emerald-700 flex items-center justify-center gap-1.5 mb-1">
+                  <KeyRound :size="15" />
+                  <span>Pickup Claim Token</span>
                 </div>
+                <div class="text-5xl sm:text-6xl font-black text-slate-900 tracking-wider font-mono select-all my-1 py-1">
+                  #{{ order.claim_token }}
+                </div>
+                <p class="text-xs text-slate-500 font-medium">
+                  Present this 4-digit token at the cafeteria counter to claim your meal
+                </p>
+              </div>
 
-                <!-- QR Code Visual Representation -->
-                <div class="bg-white p-3 rounded-xl border border-emerald-200 shadow-sm flex flex-col items-center shrink-0">
-                  <div class="w-20 h-20 bg-slate-900 rounded-lg p-1.5 flex flex-col justify-between shadow-inner relative group cursor-pointer" title="Scan Token">
-                    <div class="flex justify-between">
-                      <div class="w-4 h-4 bg-white rounded-sm flex items-center justify-center">
-                        <div class="w-2 h-2 bg-slate-900 rounded-xs"></div>
-                      </div>
-                      <div class="w-4 h-4 bg-white rounded-sm flex items-center justify-center">
-                        <div class="w-2 h-2 bg-slate-900 rounded-xs"></div>
-                      </div>
-                    </div>
-                    <!-- Center simulated QR grid matrix -->
-                    <div class="grid grid-cols-5 gap-0.5 my-auto px-1">
-                      <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
-                      <span class="w-1.5 h-1.5 bg-white"></span>
-                      <span class="w-1.5 h-1.5 bg-emerald-400"></span>
-                      <span class="w-1.5 h-1.5 bg-white"></span>
-                      <span class="w-1.5 h-1.5 bg-white rounded-full"></span>
-                    </div>
-                    <div class="flex justify-between items-end">
-                      <div class="w-4 h-4 bg-white rounded-sm flex items-center justify-center">
-                        <div class="w-2 h-2 bg-slate-900 rounded-xs"></div>
-                      </div>
-                      <div class="w-3 h-2 bg-emerald-400 rounded-xs"></div>
-                    </div>
+              <!-- Visual Status Stepper (Reserved → Confirmed → Preparing → Ready → Claimed) -->
+              <div class="mt-5 pt-4 border-t border-slate-100">
+                <div class="flex items-center justify-between relative px-2 sm:px-4">
+                  <!-- Stepper Track -->
+                  <div class="absolute left-6 right-6 top-3.5 -translate-y-1/2 h-0.5 bg-slate-200 z-0">
+                    <div 
+                      class="h-full bg-emerald-600 transition-all duration-500"
+                      :style="{ width: getStepperProgressWidth(order.status) }"
+                    ></div>
                   </div>
-                  <span class="text-[10px] font-bold font-mono text-slate-500 mt-1 uppercase tracking-tight">QR Verified</span>
+
+                  <!-- Stepper Nodes -->
+                  <div 
+                    v-for="(step, sIdx) in orderStatusSteps" 
+                    :key="step.key"
+                    class="relative z-10 flex flex-col items-center group cursor-default"
+                  >
+                    <div 
+                      class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs"
+                      :class="getStepCircleClass(order.status, sIdx)"
+                    >
+                      <Check v-if="isStepCompleted(order.status, sIdx)" :size="14" class="stroke-[3]" />
+                      <span v-else>{{ sIdx + 1 }}</span>
+                    </div>
+                    <span 
+                      class="text-[10px] sm:text-[11px] mt-1.5 font-bold transition-colors text-center"
+                      :class="getStepLabelClass(order.status, sIdx)"
+                    >
+                      {{ step.label }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -222,24 +226,36 @@
                 </span>
               </div>
 
-              <!-- Action: Convert to Take-Out button -->
-              <div v-if="order.fulfillment_type !== 'take_out'">
+              <!-- Action Row: Take-Out & Cancel -->
+              <div class="flex flex-col sm:flex-row items-center gap-3">
+                <div v-if="order.fulfillment_type !== 'take_out'" class="flex-1 w-full">
+                  <button
+                    id="convert-takeout-btn"
+                    @click="convertToTakeOut(order)"
+                    :disabled="convertingToken === order.claim_token"
+                    class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-sm rounded-xl transition-all shadow-sm disabled:opacity-60"
+                  >
+                    <Package :size="16" />
+                    <span>{{ convertingToken === order.claim_token ? 'Converting...' : 'Convert to Take-Out' }}</span>
+                  </button>
+                </div>
+                <div v-else class="flex-1 w-full text-center py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800 flex items-center justify-center gap-1.5">
+                  <Package :size="14" />
+                  <span>Marked as Take-Out. Staff will pack your meal.</span>
+                </div>
+
+                <!-- Cancel Order Button (visible ONLY when reserved/confirmed & before cutoff) -->
                 <button
-                  id="convert-takeout-btn"
-                  @click="convertToTakeOut(order)"
-                  :disabled="convertingToken === order.claim_token"
-                  class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-sm rounded-xl transition-all shadow-sm disabled:opacity-60"
+                  v-if="canCancelOrder(order)"
+                  id="cancel-order-btn"
+                  @click="promptCancelOrder(order)"
+                  :disabled="cancellingOrderId === order.id"
+                  class="w-full sm:w-auto px-4 py-2.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 hover:border-rose-300 font-bold text-sm rounded-xl transition-all active:scale-95 shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-60 shrink-0"
+                  title="Cancel this order and release inventory"
                 >
-                  <Package :size="16" />
-                  <span>{{ convertingToken === order.claim_token ? 'Converting...' : 'Convert to Take-Out' }}</span>
+                  <XCircle :size="16" />
+                  <span>{{ cancellingOrderId === order.id ? 'Cancelling...' : 'Cancel Order' }}</span>
                 </button>
-                <p class="text-[11px] text-slate-400 text-center mt-1.5">
-                  Crowded cafeteria? Switch your tray to a packed container.
-                </p>
-              </div>
-              <div v-else class="text-center py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800 flex items-center justify-center gap-1.5">
-                <Package :size="14" />
-                <span>Marked as Take-Out. Staff will pack your meal.</span>
               </div>
             </div>
           </div>
@@ -346,7 +362,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   Clock, RefreshCw, Utensils, ShoppingBag, Package, Calendar,
-  KeyRound, Receipt, Archive, CheckCircle2, AlertTriangle, X, UtensilsCrossed
+  KeyRound, Receipt, Archive, CheckCircle2, AlertTriangle, X, UtensilsCrossed,
+  Check, XCircle
 } from 'lucide-vue-next'
 
 const getImageUrl = (url) => {
@@ -358,19 +375,103 @@ const getImageUrl = (url) => {
 const orders = ref([])
 const loading = ref(false)
 const convertingToken = ref(null)
+const cancellingOrderId = ref(null)
 const toastMessage = ref('')
 const toastType = ref('success')
 let pollInterval = null
 
-// Split into active vs past orders per phase criteria:
-// Active: reserved, paid
-// Past: claimed, cancelled, expired
+// Status Stepper Definitions (Reserved -> Confirmed -> Preparing -> Ready -> Claimed)
+const orderStatusSteps = [
+  { key: 'reserved', label: 'Reserved' },
+  { key: 'confirmed', label: 'Confirmed' },
+  { key: 'preparing', label: 'Preparing' },
+  { key: 'ready', label: 'Ready' },
+  { key: 'claimed', label: 'Claimed' }
+]
+
+const getStatusStepIndex = (status) => {
+  const s = (status || '').toLowerCase()
+  if (s === 'reserved' || s === 'pending') return 0
+  if (s === 'confirmed' || s === 'paid') return 1
+  if (s === 'preparing') return 2
+  if (s === 'ready') return 3
+  if (s === 'claimed' || s === 'completed') return 4
+  return 0
+}
+
+const isStepCompleted = (status, sIdx) => {
+  return getStatusStepIndex(status) > sIdx
+}
+
+const getStepperProgressWidth = (status) => {
+  const currentIdx = getStatusStepIndex(status)
+  return `${(currentIdx / (orderStatusSteps.length - 1)) * 100}%`
+}
+
+const getStepCircleClass = (status, sIdx) => {
+  const currentIdx = getStatusStepIndex(status)
+  if (currentIdx > sIdx) {
+    return 'bg-emerald-600 text-white border-2 border-emerald-600'
+  }
+  if (currentIdx === sIdx) {
+    return 'bg-emerald-600 text-white ring-4 ring-emerald-100 border-2 border-emerald-600 animate-pulse'
+  }
+  return 'bg-white text-slate-400 border-2 border-slate-200'
+}
+
+const getStepLabelClass = (status, sIdx) => {
+  const currentIdx = getStatusStepIndex(status)
+  if (currentIdx === sIdx) return 'text-emerald-700 font-extrabold'
+  if (currentIdx > sIdx) return 'text-slate-800'
+  return 'text-slate-400'
+}
+
+// Cancellation condition: status is 'reserved' or 'confirmed' (or 'paid'/'pending') and now < cutoff
+const canCancelOrder = (order) => {
+  if (!order) return false
+  const s = (order.status || '').toLowerCase()
+  const isCancellable = ['reserved', 'confirmed', 'pending', 'paid'].includes(s)
+  if (!isCancellable) return false
+
+  if (order.ttl_expires_at) {
+    const cutoff = new Date(order.ttl_expires_at).getTime()
+    if (Date.now() >= cutoff) return false
+  }
+  return true
+}
+
+const promptCancelOrder = async (order) => {
+  if (!confirm(`Are you sure you want to cancel Order #${order.id}? This will release the reserved meals back to cafeteria stock.`)) {
+    return
+  }
+  cancellingOrderId.value = order.id
+  try {
+    const res = await fetch(`/api/reservations/${order.id}`, {
+      method: 'DELETE'
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to cancel reservation')
+    }
+    showToast(data.message || `Order #${order.id} cancelled successfully.`, 'success')
+    await fetchOrders()
+  } catch (err) {
+    console.error('Cancel order error:', err)
+    showToast(err.message || 'Failed to cancel reservation', 'error')
+  } finally {
+    cancellingOrderId.value = null
+  }
+}
+
+// Split into active vs past orders:
+// Active: reserved, pending, confirmed, paid, preparing, ready
+// Past: claimed, completed, cancelled, expired
 const activeOrders = computed(() => {
-  return orders.value.filter(o => ['reserved', 'paid'].includes(o.status))
+  return orders.value.filter(o => ['reserved', 'pending', 'confirmed', 'paid', 'preparing', 'ready'].includes(o.status))
 })
 
 const pastOrders = computed(() => {
-  return orders.value.filter(o => ['claimed', 'cancelled', 'expired'].includes(o.status))
+  return orders.value.filter(o => ['claimed', 'completed', 'cancelled', 'expired'].includes(o.status))
 })
 
 const fetchOrders = async () => {

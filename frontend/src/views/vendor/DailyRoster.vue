@@ -107,18 +107,22 @@
                   </div>
                 </div>
 
-                <!-- Nested Active Batches List (Phase B4.9) -->
-                <div v-if="item.batches && item.batches.length > 0" class="mt-3 pt-2 border-t border-slate-100 space-y-1.5">
+                <!-- Nested Active Batches List (Phase B4.9 & B4.15) -->
+                <div v-if="item.batches && item.batches.length > 0" class="mt-3 pt-2 border-t border-slate-100 space-y-2">
                   <div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                     <span>Active Batches ({{ item.batches.length }})</span>
-                    <span class="text-[10px] font-medium text-slate-400">Total remaining: {{ item.batches.reduce((sum, b) => sum + Number(b.remaining_stock), 0) }}</span>
+                    <span class="text-[10px] font-medium text-slate-500">
+                      Physical: {{ item.batches.reduce((sum, b) => sum + Number(b.remaining_stock), 0) }} | 
+                      Held: {{ item.batches.reduce((sum, b) => sum + Number(b.held_stock || 0), 0) }} | 
+                      Available: {{ item.batches.reduce((sum, b) => sum + Math.max(0, Number(b.remaining_stock) - Number(b.held_stock || 0)), 0) }}
+                    </span>
                   </div>
                   <div 
                     v-for="b in item.batches" 
                     :key="b.id" 
-                    class="flex items-center justify-between text-xs bg-slate-50 border border-slate-200/80 rounded-lg px-2.5 py-1.5 gap-2"
+                    class="flex flex-col sm:flex-row sm:items-center justify-between text-xs bg-slate-50 border border-slate-200/80 rounded-lg px-3 py-2 gap-2"
                   >
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-2 flex-wrap">
                       <span 
                         class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wide"
                         :class="b.state === 'fresh' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'"
@@ -128,9 +132,6 @@
                       <span class="text-[11px] font-medium text-slate-600">
                         {{ b.state === 'fresh' ? 'Cooked: ' + formatBatchTime(b.cooked_at) : 'Reheated: ' + formatBatchTime(b.reheated_at) }}
                       </span>
-                    </div>
-                    
-                    <div class="flex items-center gap-2">
                       <span 
                         class="text-[11px] font-semibold flex items-center gap-1"
                         :class="getSafeTimeInfo(b.sell_by).isExpired ? 'text-rose-600 font-bold' : 'text-slate-600'"
@@ -138,8 +139,21 @@
                         <Clock :size="12" class="text-slate-400" />
                         {{ getSafeTimeInfo(b.sell_by).label }}
                       </span>
-                      <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-white text-slate-800 border border-slate-200">
-                        {{ b.remaining_stock }} / {{ b.total_stock }}
+                    </div>
+                    
+                    <!-- 3 Read-Only Metrics per Batch: Physical, Held, Available -->
+                    <div class="flex items-center gap-1.5 flex-wrap shrink-0">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-white text-slate-700 border border-slate-200" title="Physical remaining stock">
+                        <span class="text-slate-400 font-normal">Physical:</span>
+                        <strong class="font-bold text-slate-900">{{ b.remaining_stock }}</strong>
+                      </span>
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200" title="Held stock reserved by customers">
+                        <span class="text-amber-600 font-normal">Held:</span>
+                        <strong class="font-bold">{{ b.held_stock || 0 }}</strong>
+                      </span>
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200" title="Available stock for new orders (Physical - Held)">
+                        <span class="text-emerald-600 font-normal">Available:</span>
+                        <strong class="font-bold">{{ Math.max(0, Number(b.remaining_stock) - Number(b.held_stock || 0)) }}</strong>
                       </span>
                     </div>
                   </div>

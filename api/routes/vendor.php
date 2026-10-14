@@ -195,7 +195,7 @@ function handleUpdateOrderStatus($pdo) {
         $updateStmt->execute([$status, $staffUserId, $order_id]);
 
         if ($status === 'cancelled') {
-            $itemStmt = $pdo->prepare("SELECT menu_item_id, quantity FROM order_items WHERE order_id = ?");
+            $itemStmt = $pdo->prepare("SELECT menu_item_id, batch_id, quantity FROM order_items WHERE order_id = ?");
             $itemStmt->execute([$order_id]);
             $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -206,10 +206,46 @@ function handleUpdateOrderStatus($pdo) {
                 SET d.quantity_claimed = GREATEST(0, d.quantity_claimed - ?)
                 WHERE d.menu_item_id = ? AND o.id = ? AND d.claim_date = DATE(o.reserved_at)
             ");
+            $releaseBatch = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE id = ?");
+            $fallbackRelease = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE menu_item_id = ? AND held_stock > 0 ORDER BY sell_by ASC LIMIT 1");
 
             foreach ($items as $item) {
-                $restoreStmt->execute([$item['quantity'], $item['quantity'], $item['menu_item_id']]);
-                $refundClaim->execute([$item['quantity'], $item['menu_item_id'], $order_id]);
+                $qty = (int)$item['quantity'];
+                $restoreStmt->execute([$qty, $qty, $item['menu_item_id']]);
+                $refundClaim->execute([$qty, $item['menu_item_id'], $order_id]);
+
+                if (!empty($item['batch_id'])) {
+                    $releaseBatch->execute([$qty, $item['batch_id']]);
+                } else {
+                    $fallbackRelease->execute([$qty, $item['menu_item_id']]);
+                }
+            }
+        } elseif (in_array($status, ['claimed', 'completed'])) {
+            $itemStmt = $pdo->prepare("SELECT menu_item_id, batch_id, quantity FROM order_items WHERE order_id = ?");
+            $itemStmt->execute([$order_id]);
+            $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $claimBatch = $pdo->prepare("
+                UPDATE batches 
+                SET remaining_stock = GREATEST(0, remaining_stock - ?), 
+                    held_stock = GREATEST(0, held_stock - ?) 
+                WHERE id = ?
+            ");
+            $fallbackClaim = $pdo->prepare("
+                UPDATE batches 
+                SET remaining_stock = GREATEST(0, remaining_stock - ?), 
+                    held_stock = GREATEST(0, held_stock - ?) 
+                WHERE menu_item_id = ? AND remaining_stock > 0 
+                ORDER BY sell_by ASC LIMIT 1
+            ");
+
+            foreach ($items as $item) {
+                $qty = (int)$item['quantity'];
+                if (!empty($item['batch_id'])) {
+                    $claimBatch->execute([$qty, $qty, $item['batch_id']]);
+                } else {
+                    $fallbackClaim->execute([$qty, $qty, $item['menu_item_id']]);
+                }
             }
         }
 
@@ -959,7 +995,7 @@ function handleGetVendorMenu($pdo) {
     $batchStmt = $pdo->prepare("
         SELECT b.id, b.menu_item_id, b.parent_batch_id, b.state, b.cooked_at, b.cooled_at,
                b.reheated_at, b.hold_hours, b.refrigerated_hours, b.reheat_hours, b.sell_by,
-               b.total_stock, b.remaining_stock, b.created_at
+               b.total_stock, b.remaining_stock, b.held_stock, b.reconciliation_offset, b.created_at
         FROM batches b
         JOIN menu_items m ON b.menu_item_id = m.id
         WHERE m.store_id = ? AND b.remaining_stock > 0 AND b.state != 'discarded'
@@ -988,6 +1024,9 @@ function handleGetVendorMenu($pdo) {
             'sell_by' => $b['sell_by'],
             'total_stock' => (int)$b['total_stock'],
             'remaining_stock' => (int)$b['remaining_stock'],
+            'held_stock' => (int)($b['held_stock'] ?? 0),
+            'reconciliation_offset' => (int)($b['reconciliation_offset'] ?? 0),
+            'available_stock' => max(0, (int)$b['remaining_stock'] - (int)($b['held_stock'] ?? 0)),
             'created_at' => $b['created_at']
         ];
     }

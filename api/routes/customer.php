@@ -33,7 +33,7 @@ function expireUnclaimedOrdersAfterClosing($pdo)
             $updateStatus = $pdo->prepare("UPDATE orders SET status = 'expired' WHERE id IN ($placeholders)");
             $updateStatus->execute($expired_orders);
 
-            $itemsStmt = $pdo->prepare("SELECT menu_item_id, quantity, order_id FROM order_items WHERE order_id IN ($placeholders)");
+            $itemsStmt = $pdo->prepare("SELECT menu_item_id, batch_id, quantity, order_id FROM order_items WHERE order_id IN ($placeholders)");
             $itemsStmt->execute($expired_orders);
             $order_items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -49,10 +49,19 @@ function expireUnclaimedOrdersAfterClosing($pdo)
                 SET d.quantity_claimed = GREATEST(0, d.quantity_claimed - ?)
                 WHERE d.menu_item_id = ? AND o.id = ? AND d.claim_date = DATE(o.reserved_at)
             ");
+            $releaseBatch = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE id = ?");
+            $fallbackReleaseBatch = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE menu_item_id = ? AND held_stock > 0 ORDER BY sell_by ASC LIMIT 1");
 
             foreach ($order_items as $item) {
-                $restoreInv->execute([$item['quantity'], $item['quantity'], $item['menu_item_id']]);
-                $refundClaim->execute([$item['quantity'], $item['menu_item_id'], $item['order_id']]);
+                $qty = (int)$item['quantity'];
+                $restoreInv->execute([$qty, $qty, $item['menu_item_id']]);
+                $refundClaim->execute([$qty, $item['menu_item_id'], $item['order_id']]);
+
+                if (!empty($item['batch_id'])) {
+                    $releaseBatch->execute([$qty, $item['batch_id']]);
+                } else {
+                    $fallbackReleaseBatch->execute([$qty, $item['menu_item_id']]);
+                }
             }
         }
         $pdo->commit();
@@ -175,14 +184,14 @@ function handleGetMenu($pdo)
     }
 
     $stmt = $pdo->prepare("
-        SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url, m.ingredients_text,
+        SELECT m.id, m.name, m.base_price, m.price_floor, m.description, m.image_url, m.photo_path, m.ingredients_text,
                m.category, m.dietary, m.ai_confirmed, m.calories, m.protein_g, m.carbs_g, m.fat_g, m.sodium_mg,
                m.hold_hours, m.refrigerated_hours, m.reheat_hours, m.reheatable,
                b.id AS batch_id, b.state AS batch_state, b.cooked_at, b.reheated_at, b.sell_by,
-               b.remaining_stock, b.hold_hours AS batch_hold_hours, b.reheat_hours AS batch_reheat_hours
+               b.remaining_stock, b.held_stock, b.hold_hours AS batch_hold_hours, b.reheat_hours AS batch_reheat_hours
         FROM menu_items m
         JOIN batches b ON m.id = b.menu_item_id
-        WHERE m.store_id = ? AND m.is_active = 1 AND b.remaining_stock > 0 AND b.state IN ('fresh', 'reheated')
+        WHERE m.store_id = ? AND m.is_active = 1 AND b.remaining_stock > 0 AND (b.remaining_stock - b.held_stock) > 0 AND b.state IN ('fresh', 'reheated')
         ORDER BY m.id DESC, b.sell_by ASC
     ");
     $stmt->execute([$store_id]);
@@ -419,10 +428,10 @@ function handleGetMenu($pdo)
 
             $poolBatches = $dishData['pools'][$pool_state];
 
-            // Sum remaining_stock in this pool
+            // Sum (remaining_stock - held_stock) in this pool
             $availableQty = 0;
             foreach ($poolBatches as $pb) {
-                $availableQty += (int)$pb['remaining_stock'];
+                $availableQty += max(0, (int)$pb['remaining_stock'] - (int)($pb['held_stock'] ?? 0));
             }
             if ($availableQty <= 0) {
                 continue;
@@ -478,6 +487,8 @@ function handleGetMenu($pdo)
                 'batch_type' => $pool_state,
                 'name' => $item['name'],
                 'description' => $item['description'],
+                'image_url' => $item['image_url'],
+                'photo_path' => $item['photo_path'] ?? $item['image_url'],
                 'category' => $item['category'] ?? 'Uncategorized',
                 'dietary' => $dietary,
                 'price' => $basePrice,
@@ -741,10 +752,10 @@ function handleCreateReservation($pdo, $input = null)
         $requiredQty = $cartReq['quantity'];
 
         $stmtStock = $pdo->prepare("
-            SELECT b.id, b.remaining_stock, b.sell_by, m.name
+            SELECT b.id, b.remaining_stock, b.held_stock, b.sell_by, m.name
             FROM batches b
             JOIN menu_items m ON b.menu_item_id = m.id
-            WHERE b.menu_item_id = ? AND b.state = ? AND b.remaining_stock > 0
+            WHERE b.menu_item_id = ? AND b.state = ? AND b.remaining_stock > 0 AND (b.remaining_stock - b.held_stock) > 0
             ORDER BY b.sell_by ASC
         ");
         $stmtStock->execute([$itemId, $bType]);
@@ -753,7 +764,7 @@ function handleCreateReservation($pdo, $input = null)
         $dishName = !empty($stockRows) ? $stockRows[0]['name'] : "Dish #$itemId";
         $availableQty = 0;
         foreach ($stockRows as $sr) {
-            $availableQty += (int)$sr['remaining_stock'];
+            $availableQty += max(0, (int)$sr['remaining_stock'] - (int)($sr['held_stock'] ?? 0));
         }
 
         if ($availableQty < $requiredQty) {
@@ -855,7 +866,7 @@ function handleCreateReservation($pdo, $input = null)
 
         $paymongoLineItems = [];
 
-        $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?)");
+        $insertItem = $pdo->prepare("INSERT INTO order_items (order_id, menu_item_id, batch_id, quantity, unit_price_at_order, portion_preference, best_effort_disclaimer_ack) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $checkClaims = $pdo->prepare("SELECT quantity_claimed FROM daily_discount_claims WHERE user_id = ? AND menu_item_id = ? AND claim_date = CURDATE()");
         $upsertClaims = $pdo->prepare("INSERT INTO daily_discount_claims (user_id, menu_item_id, claim_date, quantity_claimed) VALUES (?, ?, CURDATE(), ?) ON DUPLICATE KEY UPDATE quantity_claimed = quantity_claimed + ?");
 
@@ -870,10 +881,10 @@ function handleCreateReservation($pdo, $input = null)
 
             // Query active batches FOR UPDATE (FIFO ordering by sell_by ASC)
             $stmt = $pdo->prepare("
-                SELECT b.id, b.remaining_stock, b.sell_by, b.hold_hours, m.name, m.base_price, m.price_floor, m.hold_hours AS dish_hold_hours
+                SELECT b.id, b.remaining_stock, b.held_stock, b.sell_by, b.hold_hours, m.name, m.base_price, m.price_floor, m.hold_hours AS dish_hold_hours
                 FROM batches b
                 JOIN menu_items m ON b.menu_item_id = m.id
-                WHERE b.menu_item_id = ? AND b.state = ? AND b.remaining_stock > 0
+                WHERE b.menu_item_id = ? AND b.state = ? AND b.remaining_stock > 0 AND (b.remaining_stock - b.held_stock) > 0
                 ORDER BY b.sell_by ASC
                 FOR UPDATE
             ");
@@ -894,7 +905,7 @@ function handleCreateReservation($pdo, $input = null)
 
             $availableQty = 0;
             foreach ($batches as $b) {
-                $availableQty += (int)$b['remaining_stock'];
+                $availableQty += max(0, (int)$b['remaining_stock'] - (int)($b['held_stock'] ?? 0));
             }
 
             if ($availableQty < $qty) {
@@ -951,15 +962,6 @@ function handleCreateReservation($pdo, $input = null)
                 ? $item['portion_preference']
                 : 'no_preference';
 
-            $insertItem->execute([
-                $order_id,
-                $item_id,
-                $qty,
-                $current_price,
-                $portionPref,
-                $item['ack'] ?? 0
-            ]);
-
             $total_amount += ($current_price * $qty);
 
             $paymongoLineItems[] = [
@@ -969,26 +971,37 @@ function handleCreateReservation($pdo, $input = null)
                 'currency' => 'PHP'
             ];
 
-            // FIFO Deduction across batches: decrement remaining_stock until qty is fulfilled
-            $remainingToDeduct = $qty;
-            $stmtUpdateBatch = $pdo->prepare("
+            // FIFO Reservation across batches: increment held_stock instead of decrementing remaining_stock
+            $remainingToHold = $qty;
+            $stmtHoldBatch = $pdo->prepare("
                 UPDATE batches
-                SET remaining_stock = remaining_stock - ?
-                WHERE id = ? AND remaining_stock >= ?
+                SET held_stock = held_stock + ?
+                WHERE id = ? AND (remaining_stock - held_stock) >= ?
             ");
 
             foreach ($batches as $b) {
-                if ($remainingToDeduct <= 0) break;
-                $deductFromThis = min((int)$b['remaining_stock'], $remainingToDeduct);
+                if ($remainingToHold <= 0) break;
+                $availInBatch = max(0, (int)$b['remaining_stock'] - (int)($b['held_stock'] ?? 0));
+                if ($availInBatch <= 0) continue;
 
-                $stmtUpdateBatch->execute([$deductFromThis, $b['id'], $deductFromThis]);
-                if ($stmtUpdateBatch->rowCount() > 0) {
-                    $remainingToDeduct -= $deductFromThis;
+                $holdFromThis = min($availInBatch, $remainingToHold);
+                $stmtHoldBatch->execute([$holdFromThis, $b['id'], $holdFromThis]);
+                if ($stmtHoldBatch->rowCount() > 0) {
+                    $insertItem->execute([
+                        $order_id,
+                        $item_id,
+                        $b['id'],
+                        $holdFromThis,
+                        $current_price,
+                        $portionPref,
+                        $item['ack'] ?? 0
+                    ]);
+                    $remainingToHold -= $holdFromThis;
                 }
             }
 
-            if ($remainingToDeduct > 0) {
-                throw new BusinessException("Out of stock: Unable to fulfill {$qty} portions from {$batch_type} batches of {$dishName}.", 400);
+            if ($remainingToHold > 0) {
+                throw new BusinessException("Out of stock: Unable to reserve {$qty} portions from {$batch_type} batches of {$dishName}.", 400);
             }
 
             // Sync with inventory table
@@ -1392,3 +1405,97 @@ function handleUpdateProfile($pdo)
         jsonResponse(['error' => 'An unexpected database error occurred.'], 500);
     }
 }
+
+function handleCancelReservation($pdo, $reservationId)
+{
+    $userId = requireCustomer($pdo);
+    $reservationId = (int)$reservationId;
+    if ($reservationId <= 0) {
+        jsonResponse(['error' => 'Invalid reservation ID.'], 400);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare("SELECT * FROM orders WHERE id = ? FOR UPDATE");
+        $stmt->execute([$reservationId]);
+        $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$order) {
+            throw new BusinessException("Reservation not found.", 404);
+        }
+
+        if ((int)$order['user_id'] !== (int)$userId) {
+            throw new BusinessException("Unauthorized: You do not own this reservation.", 403);
+        }
+
+        // Must be in reserved, confirmed, paid, or pending status
+        $cancellableStatuses = ['reserved', 'confirmed', 'pending', 'paid'];
+        if (!in_array(strtolower($order['status']), $cancellableStatuses, true)) {
+            throw new BusinessException("Cannot cancel order with status '{$order['status']}'. Only active reservations can be cancelled.", 400);
+        }
+
+        // Cutoff check
+        date_default_timezone_set('Asia/Manila');
+        $tz = new DateTimeZone('Asia/Manila');
+        $now = new DateTime('now', $tz);
+
+        if (!empty($order['ttl_expires_at'])) {
+            $cutoff = new DateTime($order['ttl_expires_at'], $tz);
+            if ($now >= $cutoff) {
+                throw new BusinessException("Cancellation cutoff time has already passed.", 400);
+            }
+        }
+
+        $updateStmt = $pdo->prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?");
+        $updateStmt->execute([$reservationId]);
+
+        // Release stock on specific batch & inventory
+        $itemsStmt = $pdo->prepare("SELECT menu_item_id, batch_id, quantity FROM order_items WHERE order_id = ?");
+        $itemsStmt->execute([$reservationId]);
+        $orderItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $releaseBatch = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE id = ?");
+        $fallbackRelease = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE menu_item_id = ? AND held_stock > 0 ORDER BY sell_by ASC LIMIT 1");
+        $restoreInv = $pdo->prepare("
+            UPDATE inventory 
+            SET online_pool_qty = online_pool_qty + ?, 
+                delisted_from_app = CASE WHEN online_pool_qty + ? <= critical_stock_threshold THEN 1 ELSE 0 END 
+            WHERE menu_item_id = ?
+        ");
+        $refundClaim = $pdo->prepare("
+            UPDATE daily_discount_claims d
+            JOIN orders o ON o.user_id = d.user_id
+            SET d.quantity_claimed = GREATEST(0, d.quantity_claimed - ?)
+            WHERE d.menu_item_id = ? AND o.id = ? AND d.claim_date = DATE(o.reserved_at)
+        ");
+
+        foreach ($orderItems as $item) {
+            $qty = (int)$item['quantity'];
+            $restoreInv->execute([$qty, $qty, $item['menu_item_id']]);
+            $refundClaim->execute([$qty, $item['menu_item_id'], $reservationId]);
+
+            if (!empty($item['batch_id'])) {
+                $releaseBatch->execute([$qty, $item['batch_id']]);
+            } else {
+                $fallbackRelease->execute([$qty, $item['menu_item_id']]);
+            }
+        }
+
+        $pdo->commit();
+        jsonResponse(['success' => true, 'message' => 'Reservation cancelled successfully. Stock has been released.']);
+    } catch (BusinessException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $code = ($e->getCode() >= 400 && $e->getCode() < 500) ? (int)$e->getCode() : 400;
+        jsonResponse(['error' => $e->getMessage()], $code);
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleCancelReservation error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
+    }
+}
+

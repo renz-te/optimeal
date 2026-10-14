@@ -18,8 +18,8 @@ try {
         $updateStatus = $pdo->prepare("UPDATE orders SET status = 'expired' WHERE id IN ($placeholders)");
         $updateStatus->execute($expired_orders);
 
-        // 3. Fetch line items to restore inventory
-        $itemsStmt = $pdo->prepare("SELECT menu_item_id, quantity, order_id FROM order_items WHERE order_id IN ($placeholders)");
+        // 3. Fetch line items to restore inventory and release held stock
+        $itemsStmt = $pdo->prepare("SELECT menu_item_id, batch_id, quantity, order_id FROM order_items WHERE order_id IN ($placeholders)");
         $itemsStmt->execute($expired_orders);
         $order_items = $itemsStmt->fetchAll();
 
@@ -39,13 +39,23 @@ try {
             WHERE d.menu_item_id = ? AND o.id = ? AND d.claim_date = DATE(o.reserved_at)
         ");
 
+        $releaseBatch = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE id = ?");
+        $fallbackRelease = $pdo->prepare("UPDATE batches SET held_stock = GREATEST(0, held_stock - ?) WHERE menu_item_id = ? AND held_stock > 0 ORDER BY sell_by ASC LIMIT 1");
+
         // 4. Iterate and restore
         foreach ($order_items as $item) {
-            $restoreInv->execute([$item['quantity'], $item['quantity'], $item['menu_item_id']]);
-            $refundClaim->execute([$item['quantity'], $item['menu_item_id'], $item['order_id']]);
+            $qty = (int)$item['quantity'];
+            $restoreInv->execute([$qty, $qty, $item['menu_item_id']]);
+            $refundClaim->execute([$qty, $item['menu_item_id'], $item['order_id']]);
+
+            if (!empty($item['batch_id'])) {
+                $releaseBatch->execute([$qty, $item['batch_id']]);
+            } else {
+                $fallbackRelease->execute([$qty, $item['menu_item_id']]);
+            }
         }
 
-        echo "Cancelled " . count($expired_orders) . " expired orders and restored inventory.\n";
+        echo "Cancelled " . count($expired_orders) . " expired orders and restored inventory and released held batch stock.\n";
     } else {
         echo "No expired orders found.\n";
     }

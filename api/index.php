@@ -93,6 +93,9 @@ if ($route === '/auth/register' && $method === 'POST') {
 } elseif (preg_match('#^/reservations/(\d+)/pay$#', $route, $matches) && $method === 'POST') {
     require 'routes/customer.php';
     handlePayReservation($pdo, $matches[1]);
+} elseif (preg_match('#^/reservations/(\d+)$#', $route, $matches) && $method === 'DELETE') {
+    require 'routes/customer.php';
+    handleCancelReservation($pdo, $matches[1]);
 } elseif ($route === '/reservations/update-fulfillment' && $method === 'POST') {
     require 'routes/customer.php';
     handleUpdateFulfillment($pdo);
@@ -205,6 +208,17 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleCreateUser($pdo);
+} elseif (preg_match('#^/admin/users/(\d+)$#', $route, $matches)) {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    $userId = (int)$matches[1];
+    if ($method === 'PATCH' || $method === 'PUT' || $method === 'POST') {
+        handleUpdateUser($pdo, $userId);
+    } elseif ($method === 'DELETE') {
+        handleDeleteUser($pdo, $userId);
+    } else {
+        jsonResponse(['error' => 'Method not allowed'], 405);
+    }
 } elseif ($route === '/admin/taxonomy' && $method === 'GET') {
     requireAdmin($pdo);
     require 'routes/admin.php';

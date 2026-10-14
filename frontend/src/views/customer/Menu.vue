@@ -111,11 +111,11 @@
              
           <div class="h-40 bg-slate-100 w-full relative overflow-hidden">
             <!-- Image placeholder -->
-            <div v-if="!item.image_url" class="absolute inset-0 flex items-center justify-center text-slate-300">
+            <div v-if="!item.photo_path && !item.image_url" class="absolute inset-0 flex items-center justify-center text-slate-300">
               <UtensilsCrossed :size="36" class="text-slate-300" />
             </div>
             <!-- Real image if exists -->
-            <img v-else :src="getImageUrl(item.image_url)" 
+            <img v-else :src="item.photo_path ? `${API_BASE_URL}/${item.photo_path.replace(/^\//, '')}` : (item.image_url ? getImageUrl(item.image_url) : '')" 
                  loading="lazy"
                  class="w-full h-full object-cover transition-all" 
                  :class="getItemTier(item) === 'critical' ? 'opacity-30 grayscale filter contrast-125' : (getItemTier(item) === 'boundary' ? 'opacity-75' : '')" 
@@ -274,8 +274,8 @@
         </div>
 
         <!-- Pinned Dish Photo in Drawer -->
-        <div v-if="selectedItem.image_url" class="h-44 w-full bg-slate-100 flex-shrink-0 overflow-hidden relative border-b border-slate-100">
-          <img :src="getImageUrl(selectedItem.image_url)" loading="lazy" class="w-full h-full object-cover" :alt="selectedItem.name" />
+        <div v-if="selectedItem.photo_path || selectedItem.image_url" class="h-44 w-full bg-slate-100 flex-shrink-0 overflow-hidden relative border-b border-slate-100">
+          <img :src="selectedItem.photo_path ? `${API_BASE_URL}/${selectedItem.photo_path.replace(/^\//, '')}` : getImageUrl(selectedItem.image_url)" loading="lazy" class="w-full h-full object-cover" :alt="selectedItem.name" />
         </div>
 
         <!-- Zone 2: Scrollable Body -->
@@ -1011,10 +1011,13 @@ import { useSandbox } from '../../stores/sandbox'
 const router = useRouter()
 const { activePreviewMode, sandboxMenu, simulatedDietaryFlags, sandboxOrders } = useSandbox()
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
 const getImageUrl = (url) => {
   if (!url) return ''
-  if (url.startsWith('http') || url.startsWith('/')) return url
-  return '/' + url
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  const cleanPath = url.startsWith('/') ? url : `/${url}`
+  return `${API_BASE_URL}${cleanPath}`
 }
 
 const formatTimeDisplay = (datetimeStr) => {

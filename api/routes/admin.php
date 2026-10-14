@@ -3,11 +3,26 @@
 require_once __DIR__ . '/../PricingEngine.php';
 
 
+function logAdminAudit($pdo, $adminId, $targetUserId, $action, $details = null)
+{
+    try {
+        $stmt = $pdo->prepare("INSERT INTO admin_audit_log (admin_id, target_user_id, action, details) VALUES (?, ?, ?, ?)");
+        $detailsStr = is_array($details) ? json_encode($details) : ($details !== null ? (string)$details : null);
+        $stmt->execute([(int)$adminId, $targetUserId ? (int)$targetUserId : null, $action, $detailsStr]);
+    } catch (Exception $e) {
+        error_log("logAdminAudit error: " . $e->getMessage());
+    }
+}
+
 function handleGetUsers($pdo)
 {
     try {
-        $stmt = $pdo->query("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC");
+        $stmt = $pdo->query("SELECT id, name, email, role, is_active, created_at FROM users ORDER BY id DESC");
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($users as &$u) {
+            $u['id'] = (int)$u['id'];
+            $u['is_active'] = isset($u['is_active']) ? (bool)$u['is_active'] : true;
+        }
         jsonResponse($users);
     } catch (PDOException $e) {
         error_log("handleGetUsers error: " . $e->getMessage());
@@ -48,7 +63,7 @@ function handleCreateUser($pdo)
 
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
-        $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO users (name, email, password_hash, role, is_active) VALUES (?, ?, ?, ?, 1)");
         $stmt->execute([$name, $email, $passwordHash, $role]);
         $newUserId = (int)$pdo->lastInsertId();
 
@@ -58,13 +73,22 @@ function handleCreateUser($pdo)
             $stmtStore->execute([$newUserId, $name . ' Stall']);
         }
 
+        // Write audit log
+        $adminId = $_SESSION['user_id'] ?? 1;
+        logAdminAudit($pdo, $adminId, $newUserId, 'create_user', [
+            'name' => $name,
+            'email' => $email,
+            'role' => $role
+        ]);
+
         jsonResponse([
             'message' => 'User created successfully',
             'user' => [
                 'id' => $newUserId,
                 'name' => $name,
                 'email' => $email,
-                'role' => $role
+                'role' => $role,
+                'is_active' => true
             ]
         ], 201);
     } catch (PDOException $e) {
@@ -75,6 +99,186 @@ function handleCreateUser($pdo)
         jsonResponse(['error' => 'Failed to create user due to an internal database error.'], 500);
     } catch (Exception $e) {
         error_log("handleCreateUser error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
+    }
+}
+
+function handleUpdateUser($pdo, $targetUserId)
+{
+    try {
+        $adminId = $_SESSION['user_id'] ?? 1;
+        $targetUserId = (int)$targetUserId;
+
+        // Check if user exists
+        $stmtCheck = $pdo->prepare("SELECT id, name, email, role, is_active FROM users WHERE id = ?");
+        $stmtCheck->execute([$targetUserId]);
+        $existing = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+        if (!$existing) {
+            jsonResponse(['error' => 'User not found.'], 404);
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true) ?? [];
+        if (empty($input)) {
+            jsonResponse(['error' => 'No update payload provided.'], 400);
+        }
+
+        $updates = [];
+        $params = [];
+        $loggedActions = [];
+
+        // 1. Deactivate / Reactivate
+        if (isset($input['is_active'])) {
+            $newActive = $input['is_active'] ? 1 : 0;
+            $updates[] = "is_active = ?";
+            $params[] = $newActive;
+            $action = $newActive ? 'reactivate' : 'deactivate';
+            $loggedActions[] = [
+                'action' => $action,
+                'details' => [
+                    'previous_status' => (bool)$existing['is_active'],
+                    'new_status' => (bool)$newActive
+                ]
+            ];
+        }
+
+        // 2. Change Role
+        if (isset($input['role'])) {
+            $newRole = strtolower(trim($input['role']));
+            if ($newRole === 'customer') {
+                $newRole = 'student';
+            }
+            if (!in_array($newRole, ['student', 'vendor', 'admin'], true)) {
+                jsonResponse(['error' => 'Invalid role specified.'], 400);
+            }
+            $updates[] = "role = ?";
+            $params[] = $newRole;
+            $loggedActions[] = [
+                'action' => 'change_role',
+                'details' => [
+                    'previous_role' => $existing['role'],
+                    'new_role' => $newRole
+                ]
+            ];
+        }
+
+        // 3. Edit Profile (Name & Email)
+        $profileChanged = false;
+        $profileDetails = [];
+        if (isset($input['name'])) {
+            $name = trim($input['name']);
+            if (empty($name)) {
+                jsonResponse(['error' => 'Name cannot be empty.'], 400);
+            }
+            $updates[] = "name = ?";
+            $params[] = $name;
+            $profileDetails['name'] = $name;
+            $profileChanged = true;
+        }
+        if (isset($input['email'])) {
+            $email = trim($input['email']);
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                jsonResponse(['error' => 'Invalid email address.'], 400);
+            }
+            $updates[] = "email = ?";
+            $params[] = $email;
+            $profileDetails['email'] = $email;
+            $profileChanged = true;
+        }
+        if ($profileChanged) {
+            $loggedActions[] = [
+                'action' => 'edit_profile',
+                'details' => $profileDetails
+            ];
+        }
+
+        // 4. Reset Password
+        if (!empty($input['password'])) {
+            if (strlen($input['password']) < 6) {
+                jsonResponse(['error' => 'Password must be at least 6 characters long.'], 400);
+            }
+            $updates[] = "password_hash = ?";
+            $params[] = password_hash($input['password'], PASSWORD_DEFAULT);
+            $loggedActions[] = [
+                'action' => 'reset_password',
+                'details' => ['method' => 'admin_direct_reset']
+            ];
+        }
+
+        if (empty($updates)) {
+            jsonResponse(['error' => 'No recognized fields to update.'], 400);
+        }
+
+        $params[] = $targetUserId;
+        $sql = "UPDATE users SET " . implode(", ", $updates) . " WHERE id = ?";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        // Record audit logs
+        foreach ($loggedActions as $act) {
+            logAdminAudit($pdo, $adminId, $targetUserId, $act['action'], $act['details']);
+        }
+
+        // Fetch refreshed user
+        $stmtUpdated = $pdo->prepare("SELECT id, name, email, role, is_active, created_at FROM users WHERE id = ?");
+        $stmtUpdated->execute([$targetUserId]);
+        $updatedUser = $stmtUpdated->fetch(PDO::FETCH_ASSOC);
+        $updatedUser['id'] = (int)$updatedUser['id'];
+        $updatedUser['is_active'] = (bool)$updatedUser['is_active'];
+
+        jsonResponse([
+            'message' => 'User updated successfully.',
+            'user' => $updatedUser
+        ]);
+    } catch (PDOException $e) {
+        if ($e->getCode() == 23000) {
+            jsonResponse(['error' => 'A user with this email address already exists.'], 409);
+        }
+        error_log("handleUpdateUser PDO error: " . $e->getMessage());
+        jsonResponse(['error' => 'Database error while updating user.'], 500);
+    } catch (Exception $e) {
+        error_log("handleUpdateUser error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
+    }
+}
+
+function handleDeleteUser($pdo, $targetUserId)
+{
+    try {
+        $adminId = $_SESSION['user_id'] ?? 1;
+        $targetUserId = (int)$targetUserId;
+
+        // Prevent admin from deleting themselves
+        if ((int)$adminId === $targetUserId) {
+            jsonResponse(['error' => 'You cannot delete your own admin account.'], 400);
+        }
+
+        $stmtCheck = $pdo->prepare("SELECT id, name, email, role FROM users WHERE id = ?");
+        $stmtCheck->execute([$targetUserId]);
+        $existing = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+        if (!$existing) {
+            jsonResponse(['error' => 'User not found.'], 404);
+        }
+
+        // Log audit log before deletion (capturing snapshot)
+        logAdminAudit($pdo, $adminId, $targetUserId, 'delete', [
+            'deleted_user_id' => $targetUserId,
+            'name' => $existing['name'],
+            'email' => $existing['email'],
+            'role' => $existing['role']
+        ]);
+
+        $stmtDelete = $pdo->prepare("DELETE FROM users WHERE id = ?");
+        $stmtDelete->execute([$targetUserId]);
+
+        jsonResponse([
+            'message' => 'User deleted successfully.',
+            'id' => $targetUserId
+        ]);
+    } catch (PDOException $e) {
+        error_log("handleDeleteUser PDO error: " . $e->getMessage());
+        jsonResponse(['error' => 'Database error while deleting user.'], 500);
+    } catch (Exception $e) {
+        error_log("handleDeleteUser error: " . $e->getMessage());
         jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
     }
 }
