@@ -6,7 +6,7 @@
     
     <div class="flex justify-between items-center mb-6">
       <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Today's Menu</h2>
-      <button v-if="cart.length > 0" @click="showPlateDrawer = true" class="hidden md:flex items-center space-x-2 bg-emerald-100 text-emerald-700 px-4 py-3 rounded-full font-bold hover:bg-emerald-200 transition-colors shadow-sm">
+      <button v-if="cart.length > 0" @click="activeDrawer = 'plates'" class="hidden md:flex items-center space-x-2 bg-emerald-100 text-emerald-700 px-4 py-3 rounded-full font-bold hover:bg-emerald-200 transition-colors shadow-sm">
         <Utensils :size="18" />
         <span>Plate ({{ totalCartItems }})</span>
       </button>
@@ -379,8 +379,8 @@
     </transition>
 
     <!-- Mobile Sticky Floating Bottom Bar for Cart -->
-    <div v-if="cart.length > 0 && !showPlateDrawer" class="fixed bottom-0 left-0 w-full p-4 z-30 md:hidden pointer-events-none">
-      <button @click="showPlateDrawer = true" class="w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl shadow-[0_10px_25px_-5px_rgba(5,150,105,0.4)] flex justify-between items-center px-6 pointer-events-auto active:scale-95 transition-transform">
+    <div v-if="cart.length > 0 && activeDrawer !== 'plates'" class="fixed bottom-0 left-0 w-full p-4 z-30 md:hidden pointer-events-none">
+      <button @click="activeDrawer = 'plates'" class="w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl shadow-[0_10px_25px_-5px_rgba(5,150,105,0.4)] flex justify-between items-center px-6 pointer-events-auto active:scale-95 transition-transform">
         <div class="flex items-center space-x-2">
           <span class="bg-white/20 px-2 py-0.5 rounded-md text-sm">{{ totalCartItems }}</span>
           <span>₱{{ cartTotal.toFixed(2) }}</span>
@@ -392,19 +392,111 @@
       </button>
     </div>
 
+    <!-- Upsell Slide-Over Drawer (Complete your meal?) -->
+    <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
+      <div v-if="activeDrawer === 'upsell'" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] transition-opacity" @click="activeDrawer = 'none'"></div>
+    </transition>
+
+    <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
+      <div v-if="activeDrawer === 'upsell'" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-white shadow-2xl z-[70] flex flex-col overflow-hidden text-slate-900">
+        <!-- Header -->
+        <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 flex-shrink-0">
+          <div>
+            <h3 class="text-xl font-black text-slate-900 flex items-center gap-2">
+              <Sparkles class="text-emerald-600" :size="20" />
+              <span>Complete your meal?</span>
+            </h3>
+            <p class="text-xs text-slate-500 mt-0.5">Popular sides &amp; extras to pair with your plate</p>
+          </div>
+          <button @click="activeDrawer = 'none'" class="p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors" title="Close">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <!-- Scrollable Content -->
+        <div class="p-6 flex-1 overflow-y-auto space-y-5">
+          <!-- Recently Added Main Dish Pill -->
+          <div v-if="recentlyAddedDish" class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
+            <div class="flex items-center gap-2.5 truncate">
+              <CheckCircle2 :size="16" class="text-emerald-600 shrink-0" />
+              <div class="truncate">
+                <span class="text-emerald-900 font-bold block truncate">{{ recentlyAddedDish.name }}</span>
+                <span class="text-emerald-700 text-[11px]">Added to plate &bull; ₱{{ (recentlyAddedDish.current_price || recentlyAddedDish.base_price || 0).toFixed(2) }}</span>
+              </div>
+            </div>
+            <span class="text-[10px] font-black uppercase tracking-wider bg-emerald-200/80 text-emerald-800 px-2 py-0.5 rounded-full shrink-0">
+              Main Dish
+            </span>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500">Available Sides &amp; Extras</h4>
+              <span class="text-xs text-slate-400 font-medium">{{ availableSides.length }} options</span>
+            </div>
+
+            <!-- List of Sides -->
+            <div class="space-y-3">
+              <div
+                v-for="side in availableSides"
+                :key="side.id"
+                class="p-4 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/20 transition-all flex items-center justify-between gap-3 shadow-xs bg-white"
+              >
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 text-sm truncate">{{ side.name }}</span>
+                    <span v-if="side.category" class="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">
+                      {{ side.category }}
+                    </span>
+                  </div>
+                  <p v-if="side.description" class="text-xs text-slate-500 truncate mt-0.5">
+                    {{ side.description }}
+                  </p>
+                  <div class="text-sm font-black text-emerald-600 mt-1 tabular-nums">
+                    ₱{{ (side.current_price || side.base_price).toFixed(2) }}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  @click="addSideToPlate(side)"
+                  class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                >
+                  <Plus :size="14" />
+                  <span>Add to Plate</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer / Action Area -->
+        <div class="p-6 bg-slate-50 border-t border-slate-200 flex-shrink-0 space-y-3">
+          <button
+            type="button"
+            @click="activeDrawer = 'plates'"
+            class="w-full py-3.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold transition-all shadow-sm flex items-center justify-center gap-2 text-sm active:scale-95"
+          >
+            <span>Skip &amp; View Plate ({{ totalCartItems }})</span>
+            <Utensils :size="16" />
+          </button>
+        </div>
+      </div>
+    </transition>
+
     <!-- Plate Slide-Over Drawer -->
     <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
-      <div v-if="showPlateDrawer" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] transition-opacity" @click="showPlateDrawer = false"></div>
+      <div v-if="activeDrawer === 'plates'" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] transition-opacity" @click="activeDrawer = 'none'"></div>
     </transition>
     
     <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
-      <div v-if="showPlateDrawer" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-white shadow-2xl z-[70] flex flex-col overflow-hidden">
+      <div v-if="activeDrawer === 'plates'" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-white shadow-2xl z-[70] flex flex-col overflow-hidden">
         
         <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 flex-shrink-0">
           <h3 class="text-xl font-bold text-slate-900 flex items-center">
             <Utensils :size="20" class="mr-2" /> Today's Plate
           </h3>
-          <button @click="showPlateDrawer = false" class="p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors">
+          <button @click="activeDrawer = 'none'" class="p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors">
             <X :size="20" />
           </button>
         </div>
@@ -599,17 +691,22 @@
 
     <!-- Checkout / Claim Options Slide-Over Drawer -->
     <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
-      <div v-if="showCheckoutOptions" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] transition-opacity" @click="showCheckoutOptions = false"></div>
+      <div v-if="activeDrawer === 'checkout'" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] transition-opacity" @click="activeDrawer = 'none'"></div>
     </transition>
 
     <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
-      <div v-if="showCheckoutOptions" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-white shadow-2xl z-[100] flex flex-col overflow-hidden text-slate-900">
+      <div v-if="activeDrawer === 'checkout'" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-white shadow-2xl z-[100] flex flex-col overflow-hidden text-slate-900">
         <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-          <div>
-            <h3 class="text-xl font-black text-slate-900">How would you like to claim?</h3>
-            <p class="text-xs text-slate-500 mt-0.5">Select your payment & pickup option</p>
+          <div class="flex items-center gap-2.5">
+            <button @click="activeDrawer = 'plates'" class="p-1.5 rounded-full hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors" title="Back to Plate">
+              <ArrowLeft :size="18" />
+            </button>
+            <div>
+              <h3 class="text-xl font-black text-slate-900">How would you like to claim?</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Select your payment &amp; pickup option</p>
+            </div>
           </div>
-          <button @click="showCheckoutOptions = false" class="p-2 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors">
+          <button @click="activeDrawer = 'none'" class="p-2 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors">
             <X :size="20" />
           </button>
         </div>
@@ -688,14 +785,14 @@
 
     <!-- Confirmation Slide-Over Drawer -->
     <transition enter-active-class="transition-opacity duration-300" leave-active-class="transition-opacity duration-300" enter-from-class="opacity-0" leave-to-class="opacity-0">
-      <div v-if="showConfirmationDrawer" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] transition-opacity" @click="showConfirmationDrawer = false"></div>
+      <div v-if="activeDrawer === 'confirmation'" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] transition-opacity" @click="activeDrawer = 'none'"></div>
     </transition>
     
     <transition enter-active-class="transition transform duration-300 ease-out" leave-active-class="transition transform duration-300 ease-in" enter-from-class="translate-x-full" leave-to-class="translate-x-full">
-      <div v-if="showConfirmationDrawer" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-emerald-600 shadow-2xl z-[100] flex flex-col overflow-hidden text-white">
+      <div v-if="activeDrawer === 'confirmation'" class="fixed top-0 right-0 w-full md:max-w-md h-full bg-emerald-600 shadow-2xl z-[100] flex flex-col overflow-hidden text-white">
         
         <div class="p-6 flex justify-end">
-          <button @click="showConfirmationDrawer = false" class="p-2 rounded-full bg-white/20 hover:bg-white/30 transition-colors">
+          <button @click="activeDrawer = 'none'" class="p-2 rounded-full bg-white/20 hover:bg-white/30 transition-colors">
             <X :size="20" class="text-white" />
           </button>
         </div>
@@ -734,7 +831,7 @@
         </div>
 
         <div class="p-6">
-          <button @click="showConfirmationDrawer = false" class="w-full bg-white text-emerald-700 font-bold py-3.5 rounded-xl hover:bg-emerald-50 shadow-md transition-transform active:scale-95 text-lg">
+          <button @click="activeDrawer = 'none'" class="w-full bg-white text-emerald-700 font-bold py-3.5 rounded-xl hover:bg-emerald-50 shadow-md transition-transform active:scale-95 text-lg">
             Done
           </button>
         </div>
@@ -836,7 +933,23 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Utensils, ShoppingBag, Clock, SlidersHorizontal, AlertTriangle, X, Plus, Minus, Info, Package, UtensilsCrossed, CreditCard } from 'lucide-vue-next'
+import {
+  Utensils,
+  ShoppingBag,
+  Clock,
+  SlidersHorizontal,
+  AlertTriangle,
+  X,
+  Plus,
+  Minus,
+  Info,
+  Package,
+  UtensilsCrossed,
+  CreditCard,
+  Sparkles,
+  ArrowLeft,
+  CheckCircle2
+} from 'lucide-vue-next'
 import { useSandbox } from '../../stores/sandbox'
 
 const router = useRouter()
@@ -909,9 +1022,24 @@ const preference = ref('no_preference')
 const quantity = ref(1)
 const ttlSeconds = ref(1800) 
 const dismissedSoftWarning = ref(false)
-const showPlateDrawer = ref(false)
-const showCheckoutOptions = ref(false)
-const showConfirmationDrawer = ref(false)
+
+// Unified activeDrawer state machine: 'none' | 'upsell' | 'plates' | 'checkout' | 'confirmation'
+const activeDrawer = ref('none')
+const recentlyAddedDish = ref(null)
+
+// Backward-compatible computed bindings to enforce strict single-drawer constraint
+const showPlateDrawer = computed({
+  get: () => activeDrawer.value === 'plates',
+  set: (v) => { activeDrawer.value = v ? 'plates' : 'none' }
+})
+const showCheckoutOptions = computed({
+  get: () => activeDrawer.value === 'checkout',
+  set: (v) => { activeDrawer.value = v ? 'checkout' : 'none' }
+})
+const showConfirmationDrawer = computed({
+  get: () => activeDrawer.value === 'confirmation',
+  set: (v) => { activeDrawer.value = v ? 'confirmation' : 'none' }
+})
 const confirmationType = ref('express')
 const confirmedToken = ref('')
 const confirmedTotal = ref(0)
@@ -991,7 +1119,7 @@ const showWarning = () => {
   }, 3500)
 }
 
-watch(showPlateDrawer, () => {
+watch(activeDrawer, () => {
   limitWarning.value = ''
 })
 watch(selectedItem, () => {
@@ -1032,7 +1160,7 @@ const reconcileCart = () => {
     cart.value = newCart
     if (evictedItems.size > 0) {
       triggerEvictionNotice(Array.from(evictedItems))
-      showPlateDrawer.value = true
+      activeDrawer.value = 'plates'
     }
   }
 }
@@ -1474,6 +1602,86 @@ const proceedWithAddition = () => {
   conflictModalOpen.value = false
 }
 
+// Sides & Main Dish Classification Logic
+const isSideDish = (dish) => {
+  if (!dish) return false
+  if (dish.is_side === true || dish.is_side === 1) return true
+  const cat = (dish.category || '').toLowerCase()
+  const name = (dish.name || '').toLowerCase()
+  return (
+    cat.includes('side') || 
+    cat.includes('extra') || 
+    cat.includes('rice') ||
+    name.includes('rice') || 
+    name.includes('egg') ||
+    name.includes('sinangag')
+  )
+}
+
+const isMainDish = (dish) => {
+  if (!dish) return false
+  return !isSideDish(dish)
+}
+
+const availableSides = computed(() => {
+  // Query sides/extras from the active daily menu
+  const fromMenu = menuItems.value.filter(dish => isSideDish(dish))
+  if (fromMenu.length > 0) {
+    return fromMenu
+  }
+
+  // Graceful fallback sides if canteen inventory doesn't include sides SKUs today
+  return [
+    {
+      id: 9901,
+      name: 'Plain Steamed Rice',
+      category: 'Sides / Extras',
+      description: 'Hot cup of fluffy steamed Jasmine rice',
+      current_price: 15.00,
+      base_price: 15.00,
+      stock: 50,
+      is_side: true
+    },
+    {
+      id: 9902,
+      name: 'Sunny-Side Up Egg',
+      category: 'Sides / Extras',
+      description: 'Crispy fried farm egg with golden runny yolk',
+      current_price: 15.00,
+      base_price: 15.00,
+      stock: 30,
+      is_side: true
+    },
+    {
+      id: 9903,
+      name: 'Garlic Fried Rice',
+      category: 'Sides / Extras',
+      description: 'Fragrant sinangag tossed with toasted garlic',
+      current_price: 20.00,
+      base_price: 20.00,
+      stock: 40,
+      is_side: true
+    }
+  ]
+})
+
+const addSideToPlate = (sideItem) => {
+  const existingIndex = cart.value.findIndex(
+    c => c.item.id === sideItem.id && c.preference === 'no_preference'
+  )
+  if (existingIndex > -1) {
+    cart.value[existingIndex].quantity += 1
+  } else {
+    cart.value.push({
+      item: sideItem,
+      quantity: 1,
+      preference: 'no_preference'
+    })
+  }
+  ttlSeconds.value = 1800
+  activeDrawer.value = 'plates'
+}
+
 const confirmAddToPlate = () => {
   if (!selectedItem.value || selectedItem.value.stock <= 0) return
 
@@ -1493,6 +1701,9 @@ const confirmAddToPlate = () => {
     }
   }
 
+  const itemAdded = selectedItem.value
+  const isMain = isMainDish(itemAdded)
+
   const existingIndex = cart.value.findIndex(
     c => c.item.id === selectedItem.value.id && c.preference === preference.value
   )
@@ -1511,12 +1722,20 @@ const confirmAddToPlate = () => {
     selectedItem.value = null
   }
   ttlSeconds.value = 1800 // extend TTL
+
+  // Enforce Upsell Drawer on main dish addition, else proceed to plates
+  if (isMain) {
+    recentlyAddedDish.value = itemAdded
+    activeDrawer.value = 'upsell'
+  } else {
+    activeDrawer.value = 'plates'
+  }
 }
 
 const removeFromCart = (index) => {
   cart.value.splice(index, 1)
   if (cart.value.length === 0) {
-    showPlateDrawer.value = false
+    activeDrawer.value = 'none'
   }
 }
 
@@ -1588,7 +1807,12 @@ const confirmAddAllergenDish = () => {
   if (selectedItem.value && selectedItem.value.id === itemToAdd.id) {
     selectedItem.value = null
   }
-  showPlateDrawer.value = true
+  if (isMainDish(itemToAdd)) {
+    recentlyAddedDish.value = itemToAdd
+    activeDrawer.value = 'upsell'
+  } else {
+    activeDrawer.value = 'plates'
+  }
 }
 
 const handleDishButtonClick = (item) => {
@@ -1614,7 +1838,7 @@ const initiateCheckout = () => {
 
 const proceedToCheckout = () => {
   checkoutError.value = ''
-  showCheckoutOptions.value = true
+  activeDrawer.value = 'checkout'
 }
 
 const processOrder = async (type) => {
@@ -1683,8 +1907,7 @@ const processOrder = async (type) => {
       const data = await res.json()
 
       if (paymentMethod.value === 'paymongo' && data.checkout_url) {
-        showCheckoutOptions.value = false
-        showPlateDrawer.value = false
+        activeDrawer.value = 'none'
         cart.value = []
         window.location.href = data.checkout_url
         return
@@ -1697,11 +1920,9 @@ const processOrder = async (type) => {
       await fetchMenu()
     }
     
-    showCheckoutOptions.value = false
-    showPlateDrawer.value = false
+    activeDrawer.value = 'confirmation'
     confirmedTotal.value = currentTotal
     confirmedFulfillmentType.value = orderType.value
-    showConfirmationDrawer.value = true
     cart.value = []
     router.push('/customer/orders')
   } catch (e) {
