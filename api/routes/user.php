@@ -18,8 +18,8 @@ function handleGetPreferences($pdo, $userId)
     if (!$prefs) {
         // Automatically insert default preferences if none exist
         $insert = $pdo->prepare("
-            INSERT INTO user_preferences (user_id, default_portion)
-            VALUES (?, 'no_preference')
+            INSERT INTO user_preferences (user_id)
+            VALUES (?)
         ");
         $insert->execute([$userId]);
 
@@ -54,7 +54,6 @@ function handlePatchPreferences($pdo, $userId, $input = null)
     }
 
     $allowedFields = [
-        'default_portion',
         'notify_quota_hit',
         'notify_order_status',
         'notify_decay',

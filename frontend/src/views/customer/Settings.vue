@@ -4,18 +4,18 @@
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
         <h1 class="text-3xl font-black text-slate-900 tracking-tight">Customer Settings & Impact</h1>
-        <p class="text-slate-500 mt-1 font-medium">Manage your personal impact, dietary guardrails, portion preferences, and alerts.</p>
+        <p class="text-slate-500 mt-1 font-medium">Manage your personal impact, dietary guardrails, and alerts.</p>
       </div>
 
       <div class="flex items-center space-x-3 shrink-0">
         <button 
           id="save-preferences-header-btn"
           @click="saveAllPreferences" 
-          :disabled="saving"
-          class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-sm transition-all active:scale-95 disabled:opacity-50 flex items-center space-x-2"
+          :disabled="saving || !hasUnsavedChanges"
+          class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
         >
           <span v-if="saving" class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
-          <span>{{ saving ? 'Saving...' : 'Save Changes' }}</span>
+          <span>{{ saving ? 'Saving...' : (hasUnsavedChanges ? 'Save Changes' : 'Saved') }}</span>
         </button>
       </div>
     </div>
@@ -34,13 +34,34 @@
     <!-- 1. IMPACT DASHBOARD -->
     <section class="bg-gradient-to-br from-emerald-900 to-slate-900 text-white p-6 sm:p-8 rounded-3xl shadow-xl overflow-hidden relative">
       <div class="relative z-10">
-        <div class="flex items-center space-x-2.5 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-2">
-          <Leaf :size="16" />
-          <span>Your Sustainability Impact</span>
-        </div>
-        <h2 class="text-2xl font-black tracking-tight text-white mb-6">Food Rescue & Savings Tracker</h2>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div>
+            <div class="flex items-center space-x-2.5 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-1.5">
+              <Leaf :size="16" />
+              <span>Your Sustainability Impact</span>
+            </div>
+            <h2 class="text-2xl font-black tracking-tight text-white">Food Rescue & Savings Tracker</h2>
+          </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+          <!-- Timeframe Selector Toggle Group -->
+          <div class="inline-flex p-1 bg-white/10 backdrop-blur-md rounded-xl border border-white/10 self-start sm:self-auto">
+            <button
+              v-for="tf in timeframeOptions"
+              :key="tf.value"
+              :id="`timeframe-${tf.value}`"
+              type="button"
+              @click="setTimeframe(tf.value)"
+              class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+              :class="selectedTimeframe === tf.value
+                ? 'bg-emerald-500 text-white shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-white/5'"
+            >
+              {{ tf.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6" :class="{ 'opacity-60 transition-opacity': loadingImpact }">
           <!-- Card 1: Meals Rescued -->
           <div class="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-5 flex flex-col justify-between hover:bg-white/15 transition-colors">
             <div class="flex items-center justify-between text-emerald-300 mb-3">
@@ -50,7 +71,10 @@
               </div>
             </div>
             <div>
-              <div class="text-3xl font-black text-white">{{ impactStats.mealsRescued }}</div>
+              <div class="text-3xl font-black text-white flex items-center">
+                <span>{{ impactStats.mealsRescued }}</span>
+                <span v-if="loadingImpact" class="ml-2 animate-spin w-4 h-4 border-2 border-white/40 border-t-white rounded-full"></span>
+              </div>
               <p class="text-xs text-slate-300 mt-1 font-medium">Surplus portions saved from waste</p>
             </div>
           </div>
@@ -64,7 +88,10 @@
               </div>
             </div>
             <div>
-              <div class="text-3xl font-black text-white">₱{{ impactStats.moneySaved.toFixed(2) }}</div>
+              <div class="text-3xl font-black text-white flex items-center">
+                <span>₱{{ Number(impactStats.moneySaved).toFixed(2) }}</span>
+                <span v-if="loadingImpact" class="ml-2 animate-spin w-4 h-4 border-2 border-white/40 border-t-white rounded-full"></span>
+              </div>
               <p class="text-xs text-slate-300 mt-1 font-medium">Decay discounts & meal deals</p>
             </div>
           </div>
@@ -78,7 +105,10 @@
               </div>
             </div>
             <div>
-              <div class="text-3xl font-black text-white">{{ impactStats.co2Prevented }} <span class="text-lg font-bold">kg</span></div>
+              <div class="text-3xl font-black text-white flex items-center">
+                <span>{{ impactStats.co2Prevented }} <span class="text-lg font-bold">kg</span></span>
+                <span v-if="loadingImpact" class="ml-2 animate-spin w-4 h-4 border-2 border-white/40 border-t-white rounded-full"></span>
+              </div>
               <p class="text-xs text-slate-300 mt-1 font-medium">Estimated emissions diverted</p>
             </div>
           </div>
@@ -241,34 +271,7 @@
       </div>
     </section>
 
-    <!-- 5. DEFAULT PORTION PREFERENCES -->
-    <section class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200/80 shadow-sm space-y-5">
-      <div>
-        <h2 class="text-xl font-bold text-slate-900 tracking-tight">Default Portion Preference</h2>
-        <p class="text-sm text-slate-500 mt-1">Select your preferred preparation style communicated automatically to cafeteria cooks.</p>
-      </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <label 
-          v-for="opt in portionOptions" 
-          :key="opt.value"
-          class="relative flex flex-col p-4 rounded-2xl border cursor-pointer transition-all hover:bg-slate-50"
-          :class="defaultPortion === opt.value ? 'border-emerald-500 bg-emerald-50/30 ring-2 ring-emerald-500/20' : 'border-slate-200 bg-white'"
-        >
-          <div class="flex items-center justify-between mb-2">
-            <span class="font-bold text-sm text-slate-900">{{ opt.label }}</span>
-            <input 
-              type="radio" 
-              name="portion" 
-              :value="opt.value" 
-              v-model="defaultPortion"
-              class="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300" 
-            />
-          </div>
-          <span class="text-xs text-slate-500 leading-snug">{{ opt.desc }}</span>
-        </label>
-      </div>
-    </section>
 
     <!-- 6. NOTIFICATION PREFERENCES -->
     <section class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200/80 shadow-sm space-y-6">
@@ -400,12 +403,12 @@
       <button 
         id="save-preferences-floating-btn"
         @click="saveAllPreferences" 
-        :disabled="saving"
-        class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-8 rounded-2xl shadow-xl hover:shadow-2xl transition-all active:scale-95 disabled:opacity-50 flex items-center space-x-2.5 border border-emerald-500/30"
+        :disabled="saving || !hasUnsavedChanges"
+        class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-8 rounded-2xl shadow-xl hover:shadow-2xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2.5 border border-emerald-500/30"
       >
         <span v-if="saving" class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
         <CheckCircle v-else :size="18" />
-        <span>{{ saving ? 'Saving Preferences...' : 'Save Preferences' }}</span>
+        <span>{{ saving ? 'Saving Preferences...' : (hasUnsavedChanges ? 'Save Preferences' : 'Saved') }}</span>
       </button>
     </div>
 
@@ -496,12 +499,43 @@ const saving = ref(false)
 const successMessage = ref('')
 const errorMessage = ref('')
 
-// Impact Dashboard Stats (Mock / aggregated)
+// Impact Dashboard Stats & Timeframe Filter
+const timeframeOptions = [
+  { value: 'week', label: 'This Week' },
+  { value: 'month', label: 'This Month' },
+  { value: 'all_time', label: 'All Time' }
+]
+const selectedTimeframe = ref('week')
+const loadingImpact = ref(false)
+
 const impactStats = reactive({
-  mealsRescued: 14,
-  moneySaved: 420.00,
-  co2Prevented: 8.5
+  mealsRescued: 0,
+  moneySaved: 0.00,
+  co2Prevented: 0.0
 })
+
+const fetchImpact = async (tf = selectedTimeframe.value) => {
+  loadingImpact.value = true
+  try {
+    const res = await fetch(`/api/customer/impact?timeframe=${tf}`)
+    if (res.ok) {
+      const data = await res.json()
+      impactStats.mealsRescued = data.mealsRescued ?? (data.meals_rescued ?? 0)
+      impactStats.moneySaved = Number(data.moneySaved ?? (data.money_saved ?? 0))
+      impactStats.co2Prevented = Number(data.co2Prevented ?? (data.co2_prevented ?? 0))
+    }
+  } catch (err) {
+    console.error('Failed to fetch impact stats:', err)
+  } finally {
+    loadingImpact.value = false
+  }
+}
+
+const setTimeframe = (tf) => {
+  if (selectedTimeframe.value === tf) return
+  selectedTimeframe.value = tf
+  fetchImpact(tf)
+}
 
 // Profile Details
 const profile = reactive({
@@ -517,21 +551,35 @@ const selectedAllergens = ref([])
 const selectedBoundaries = ref([])
 const selectedSensitivities = ref([])
 
-// Portion Preference
-const defaultPortion = ref('no_preference')
-const portionOptions = [
-  { value: 'no_preference', label: 'No Preference', desc: 'Standard portion size' },
-  { value: 'lean_meat', label: 'Lean Meat', desc: 'Prioritize leaner cuts with less fat' },
-  { value: 'bone_fat', label: 'Bone Fat', desc: 'Rich cuts with savory bone and fat' },
-  { value: 'extra_sauce', label: 'Extra Sauce', desc: 'Generous scoop of sauce or gravy' }
-]
-
 // Notification Preferences
 const notificationsForm = reactive({
   notify_quota_hit: true,
   notify_order_status: true,
   notify_decay: true,
   notify_menu_published: true
+})
+
+// Unsaved changes tracking
+const initialSnapshot = ref('')
+
+const takeSnapshot = () => {
+  return JSON.stringify({
+    targetCalories: targetCalories.value,
+    allergens: [...selectedAllergens.value].sort(),
+    boundaries: [...selectedBoundaries.value].sort(),
+    sensitivities: [...selectedSensitivities.value].sort(),
+    notifications: {
+      quota: notificationsForm.notify_quota_hit,
+      order: notificationsForm.notify_order_status,
+      decay: notificationsForm.notify_decay,
+      menu: notificationsForm.notify_menu_published
+    }
+  })
+}
+
+const hasUnsavedChanges = computed(() => {
+  if (!initialSnapshot.value) return false
+  return takeSnapshot() !== initialSnapshot.value
 })
 
 // Modal states
@@ -593,9 +641,6 @@ const loadSettings = async () => {
     const prefRes = await fetch('/api/user/preferences')
     if (prefRes.ok) {
       const prefs = await prefRes.json()
-      if (prefs.default_portion) {
-        defaultPortion.value = prefs.default_portion
-      }
       if (typeof prefs.notify_quota_hit === 'boolean') {
         notificationsForm.notify_quota_hit = prefs.notify_quota_hit
       }
@@ -609,6 +654,9 @@ const loadSettings = async () => {
         notificationsForm.notify_menu_published = prefs.notify_menu_published
       }
     }
+
+    // Capture baseline snapshot for unsaved changes tracking
+    initialSnapshot.value = takeSnapshot()
   } catch (err) {
     console.error('Failed to load customer settings', err)
   } finally {
@@ -637,9 +685,8 @@ const saveAllPreferences = async () => {
       body: JSON.stringify(profilePayload)
     })
 
-    // Save preferences (portion & notifications)
+    // Save preferences (notifications)
     const prefPayload = {
-      default_portion: defaultPortion.value,
       notify_quota_hit: notificationsForm.notify_quota_hit,
       notify_order_status: notificationsForm.notify_order_status,
       notify_decay: notificationsForm.notify_decay,
@@ -673,10 +720,12 @@ const saveAllPreferences = async () => {
           dietary: profilePayload.dietary_boundaries,
           sensitivities: profilePayload.sensitivities
         }
-        parsed.default_portion = defaultPortion.value
         localStorage.setItem('optimeal_user', JSON.stringify(parsed))
       } catch (e) {}
     }
+
+    // Sync baseline snapshot
+    initialSnapshot.value = takeSnapshot()
 
     successMessage.value = 'Settings and dietary preferences saved successfully!'
     setTimeout(() => { successMessage.value = '' }, 4000)
@@ -724,7 +773,6 @@ const downloadUserData = () => {
       dietary_boundaries: selectedBoundaries.value,
       sensitivities: selectedSensitivities.value
     },
-    portion_preference: defaultPortion.value,
     notifications: notificationsForm,
     impact: impactStats
   }
@@ -750,5 +798,6 @@ const confirmDeleteAccount = () => {
 
 onMounted(() => {
   loadSettings()
+  fetchImpact()
 })
 </script>

@@ -286,11 +286,14 @@ if ($route === '/auth/register' && $method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     require 'routes/notifications.php';
     handleMarkAsRead($session['user_id'], $input);
+} elseif (($route === '/customer/impact' || $route === '/api/customer/impact' || $route === '/impact') && $method === 'GET') {
+    require 'routes/customer.php';
+    handleGetCustomerImpact($pdo);
 } elseif (($route === '/user/preferences' || $route === '/api/user/preferences') && $method === 'GET') {
     $session = requireRole($pdo, ['student', 'customer', 'vendor', 'admin']);
     require 'routes/user.php';
     handleGetPreferences($pdo, $session['user_id']);
-} elseif (($route === '/user/preferences' || $route === '/api/user/preferences') && ($method === 'PATCH' || $method === 'POST')) {
+} elseif (($route === '/user/preferences' || $route === '/api/user/preferences') && in_array($method, ['PATCH', 'POST', 'PUT'])) {
     $session = requireRole($pdo, ['student', 'customer', 'vendor', 'admin']);
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     require 'routes/user.php';

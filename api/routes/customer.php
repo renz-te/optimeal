@@ -1499,3 +1499,51 @@ function handleCancelReservation($pdo, $reservationId)
     }
 }
 
+function handleGetCustomerImpact($pdo)
+{
+    $userId = requireCustomer($pdo);
+
+    $timeframe = strtolower(trim($_GET['timeframe'] ?? 'week'));
+    if (!in_array($timeframe, ['week', 'month', 'all_time'], true)) {
+        $timeframe = 'week';
+    }
+
+    $dateCondition = "";
+    if ($timeframe === 'week') {
+        $dateCondition = "AND o.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+    } elseif ($timeframe === 'month') {
+        $dateCondition = "AND o.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+    }
+
+    $sql = "
+        SELECT 
+            COALESCE(SUM(oi.quantity), 0) AS meals_rescued,
+            COALESCE(SUM(GREATEST(0, (m.base_price - oi.unit_price_at_order) * oi.quantity)), 0.00) AS money_saved
+        FROM orders o
+        JOIN order_items oi ON o.id = oi.order_id
+        JOIN menu_items m ON oi.menu_item_id = m.id
+        WHERE o.user_id = ?
+          AND o.status IN ('reserved', 'paid', 'claimed')
+          $dateCondition
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $mealsRescued = (int)($row['meals_rescued'] ?? 0);
+    $moneySaved = (float)($row['money_saved'] ?? 0.00);
+    $co2Prevented = round($mealsRescued * 0.6, 1);
+
+    jsonResponse([
+        'timeframe' => $timeframe,
+        'mealsRescued' => $mealsRescued,
+        'moneySaved' => (float)number_format($moneySaved, 2, '.', ''),
+        'co2Prevented' => (float)$co2Prevented,
+        'meals_rescued' => $mealsRescued,
+        'money_saved' => (float)number_format($moneySaved, 2, '.', ''),
+        'co2_prevented' => (float)$co2Prevented
+    ]);
+}
+
+
