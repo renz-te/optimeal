@@ -1,7 +1,11 @@
 <template>
-  <div class="flex h-screen bg-slate-100 font-sans antialiased text-slate-900 overflow-hidden">
-    <!-- Desktop Sidebar -->
-    <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full flex-shrink-0 relative z-20 shadow-xl">
+  <div class="flex flex-col h-screen bg-slate-100 font-sans antialiased text-slate-900 overflow-hidden">
+    <!-- Global Announcement Banner (Top of layout above sidebar & main content) -->
+    <GlobalAnnouncement />
+
+    <div class="flex flex-1 min-h-0 overflow-hidden">
+      <!-- Desktop Sidebar -->
+      <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full flex-shrink-0 relative z-20 shadow-xl">
       <div class="p-6 flex items-center justify-between">
         <div>
           <h1 class="text-2xl font-black text-emerald-400 tracking-tight">OptiMeal</h1>
@@ -227,26 +231,9 @@
         </div>
       </header>
 
-      <!-- Global Announcement Banner -->
-      <div 
-        v-if="globalAnnouncement && !isAnnouncementDismissed" 
-        class="bg-amber-500 text-slate-950 px-6 py-2.5 shadow-sm flex items-center justify-between border-b border-amber-600/30 text-sm font-bold z-30 shrink-0"
-      >
-        <div class="flex items-center space-x-2.5">
-          <Megaphone :size="18" class="text-slate-950 shrink-0 animate-pulse" />
-          <span>{{ globalAnnouncement }}</span>
-        </div>
-        <button 
-          @click="dismissAnnouncement" 
-          class="p-1 hover:bg-amber-600/30 rounded-lg transition-colors text-slate-950" 
-          title="Dismiss announcement"
-        >
-          <X :size="16" />
-        </button>
-      </div>
-
       <router-view></router-view>
     </main>
+    </div>
   </div>
 </template>
 
@@ -264,12 +251,12 @@ import {
   Coins,
   LineChart,
   LogOut,
-  Megaphone,
   X,
   Bell,
   Settings,
   ChevronDown
 } from 'lucide-vue-next'
+import GlobalAnnouncement from '../components/GlobalAnnouncement.vue'
 import { useSandbox } from '../stores/sandbox'
 import { getNotifications, markNotificationsRead } from '../services/api'
 
@@ -279,9 +266,6 @@ const role = ref('vendor')
 const userName = ref('')
 const userEmail = ref('')
 const isUserMenuOpen = ref(false)
-
-const globalAnnouncement = ref('')
-const isAnnouncementDismissed = ref(false)
 
 // Notifications state
 const notifications = ref([])
@@ -342,30 +326,7 @@ const formatTime = (ts) => {
   }
 }
 
-const fetchAnnouncement = async () => {
-  try {
-    const res = await fetch('/api/announcement')
-    if (res.ok) {
-      const data = await res.json()
-      globalAnnouncement.value = data.global_announcement || ''
-      const dismissed = localStorage.getItem('optimeal_dismissed_announcement')
-      if (dismissed === globalAnnouncement.value) {
-        isAnnouncementDismissed.value = true
-      } else {
-        isAnnouncementDismissed.value = false
-      }
-    }
-  } catch (e) {
-    console.error('Failed to fetch announcement', e)
-  }
-}
 
-const dismissAnnouncement = () => {
-  isAnnouncementDismissed.value = true
-  if (globalAnnouncement.value) {
-    localStorage.setItem('optimeal_dismissed_announcement', globalAnnouncement.value)
-  }
-}
 
 const displayRole = computed(() => {
   if (role.value === 'admin' && activePreviewMode.value === 'vendor') return 'vendor'
@@ -385,7 +346,6 @@ onMounted(() => {
     router.push('/customer/login')
   }
 
-  fetchAnnouncement()
   fetchNotifications()
   pollIntervalId = setInterval(fetchNotifications, 20000)
 })

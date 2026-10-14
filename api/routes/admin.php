@@ -548,10 +548,13 @@ function handleUpdateSettings(PDO $pdo): void
 function handleGetAnnouncement($pdo)
 {
     try {
-        $stmt = $pdo->query("SELECT global_announcement FROM settings WHERE id = 1");
-        $announcement = $stmt ? $stmt->fetchColumn() : null;
+        $stmt = $pdo->query("SELECT global_announcement, announcement_severity, announcement_expires_at, enable_global_announcements FROM settings WHERE id = 1");
+        $settings = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : [];
         jsonResponse([
-            'global_announcement' => $announcement ?: null
+            'global_announcement' => $settings['global_announcement'] ?? null,
+            'announcement_severity' => $settings['announcement_severity'] ?? 'info',
+            'announcement_expires_at' => $settings['announcement_expires_at'] ?? null,
+            'enable_global_announcements' => isset($settings['enable_global_announcements']) ? (bool)$settings['enable_global_announcements'] : true
         ]);
     } catch (Exception $e) {
         error_log("handleGetAnnouncement error: " . $e->getMessage());
