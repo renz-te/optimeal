@@ -45,8 +45,58 @@
       <span>{{ successMessage }}</span>
     </div>
 
-    <!-- Live Platform Metrics Grid -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <!-- Tab Navigation -->
+    <div class="flex items-center space-x-2 border-b border-slate-200 mb-8 pb-px">
+      <button
+        type="button"
+        id="tab-btn-settings"
+        @click="activeTab = 'settings'"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer"
+        :class="
+          activeTab === 'settings'
+            ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+        "
+      >
+        <Sliders :size="16" />
+        <span>System Settings</span>
+      </button>
+
+      <button
+        type="button"
+        id="tab-btn-overview"
+        @click="activeTab = 'overview'"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer"
+        :class="
+          activeTab === 'overview'
+            ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+        "
+      >
+        <LayoutDashboard :size="16" />
+        <span>Platform Overview</span>
+      </button>
+
+      <button
+        type="button"
+        id="tab-btn-all"
+        @click="activeTab = 'all'"
+        class="px-5 py-3 font-bold text-sm rounded-t-xl transition-all border-b-2 flex items-center gap-2 cursor-pointer"
+        :class="
+          activeTab === 'all'
+            ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50'
+            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+        "
+      >
+        <Layers :size="16" />
+        <span>All Sections</span>
+      </button>
+    </div>
+
+    <!-- Platform Overview Section -->
+    <div v-show="activeTab === 'all' || activeTab === 'overview'" class="space-y-8 mb-8">
+      <!-- Live Platform Metrics Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       <!-- Card 1: Users -->
       <div
         class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between"
@@ -383,290 +433,375 @@
         </div>
       </div>
     </div>
+    </div>
 
-    <!-- Global Announcement Banner Management (Task 4) -->
-    <div
-      class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8"
-    >
+    <!-- System Settings Section -->
+    <div v-show="activeTab === 'all' || activeTab === 'settings'" class="space-y-8">
+      <!-- Alert / Notice inside Settings -->
       <div
-        class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+        v-if="settingsError"
+        class="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl text-sm font-semibold flex items-center"
       >
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-amber-100 text-amber-800 rounded-xl">
-            <Megaphone :size="20" />
-          </div>
-          <div>
-            <h2 class="text-lg font-bold text-slate-900">
-              Global Announcement Banner
-            </h2>
-            <p class="text-xs text-slate-500 mt-0.5">
-              Broadcast an urgent notification displayed across all student and
-              vendor screens.
-            </p>
-          </div>
-        </div>
-
-        <span
-          v-if="settingsForm.global_announcement"
-          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200"
-        >
-          <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-          Active Broadcast
-        </span>
-        <span v-else class="text-xs font-medium text-slate-400">
-          No announcement active
-        </span>
+        <AlertCircle :size="18" class="mr-2 shrink-0" />
+        <span>{{ settingsError }}</span>
       </div>
 
-      <div class="p-6 space-y-4">
-        <div>
-          <label
-            class="block text-xs font-bold uppercase text-slate-600 mb-1.5 flex items-center justify-between"
-          >
-            <span>Announcement Message</span>
+      <!-- PANEL 1: OPERATING HOURS -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 bg-emerald-100 text-emerald-800 rounded-xl">
+              <Clock :size="20" />
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-slate-900">Operating Hours & Schedule</h2>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Baseline daily operating schedule and temporary emergency closing time overrides.
+              </p>
+            </div>
+          </div>
+
+          <div v-if="settingsForm.effective_closing_time" class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-500">Effective Closing:</span>
             <span
-              class="text-xs font-mono font-semibold"
-              :class="
-                announcementText.length >= 190
-                  ? 'text-rose-600 font-bold'
-                  : 'text-slate-400'
-              "
+              class="px-2.5 py-1 rounded-full text-xs font-bold font-mono"
+              :class="overrideClosingTimeEnabled ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-800 border border-slate-200'"
             >
-              {{ announcementText.length }}/200
+              {{ settingsForm.effective_closing_time }}
+              <span v-if="overrideClosingTimeEnabled" class="ml-1 text-[10px] font-extrabold uppercase text-amber-700">(Override Active)</span>
             </span>
-          </label>
-          <input
-            id="announcement-input"
-            v-model="announcementText"
-            type="text"
-            maxlength="200"
-            placeholder="e.g. Cafeteria will close at 18:00 today for disinfection. Please claim reservations early."
-            class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none text-sm font-medium text-slate-800 bg-white"
-          />
+          </div>
         </div>
 
-        <div class="flex items-center justify-between pt-2">
-          <p class="text-xs text-slate-500">
-            Visible at the top of customer menu and vendor portal until
-            dismissed or cleared.
-          </p>
+        <div class="p-6 space-y-6">
+          <!-- Baseline Times (Read-only / Baseline Display) -->
+          <div>
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Current Baseline Hours</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60">
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Daily Opening Time</div>
+                <div class="text-2xl font-black font-mono text-slate-800">{{ settingsForm.opening_time || '07:00' }}</div>
+                <p class="text-[11px] text-slate-400 mt-1">Standard counter open time</p>
+              </div>
 
-          <div class="flex items-center gap-3">
+              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60">
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Daily Base Closing Time</div>
+                <div class="text-2xl font-black font-mono text-slate-800">{{ settingsForm.closing_time || '20:00' }}</div>
+                <p class="text-[11px] text-slate-400 mt-1">Configured baseline closing hour</p>
+              </div>
+
+              <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/60">
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Reservation Expiry TTL</div>
+                <div class="text-2xl font-black font-mono text-slate-800">{{ settingsForm.reservation_ttl || 30 }} <span class="text-sm font-semibold text-slate-500">mins</span></div>
+                <p class="text-[11px] text-slate-400 mt-1">Auto-cancel uncollected reservations</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Override Closing Time Toggle & Conditional Input Fields -->
+          <div
+            class="p-5 rounded-xl border transition-all"
+            :class="overrideClosingTimeEnabled ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200' : 'bg-slate-50/80 border-slate-200'"
+          >
+            <div class="flex items-start justify-between gap-4">
+              <div class="space-y-1">
+                <div class="flex items-center gap-2">
+                  <label for="override-closing-toggle" class="font-bold text-sm text-slate-900 cursor-pointer select-none">
+                    Override Closing Time
+                  </label>
+                  <span
+                    v-if="overrideClosingTimeEnabled"
+                    class="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300"
+                  >
+                    Override Active
+                  </span>
+                </div>
+                <p class="text-xs text-slate-500 leading-relaxed">
+                  Temporarily enforce an alternative closing time with a scheduled expiration date.
+                </p>
+              </div>
+
+              <input
+                id="override-closing-toggle"
+                type="checkbox"
+                v-model="overrideClosingTimeEnabled"
+                class="mt-1 h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+              />
+            </div>
+
+            <!-- Revealed Fields when Checked -->
+            <transition
+              enter-active-class="transition duration-200 ease-out"
+              enter-from-class="transform opacity-0 -translate-y-2"
+              enter-to-class="transform opacity-100 translate-y-0"
+              leave-active-class="transition duration-150 ease-in"
+              leave-from-class="transform opacity-100 translate-y-0"
+              leave-to-class="transform opacity-0 -translate-y-2"
+            >
+              <div
+                v-if="overrideClosingTimeEnabled"
+                class="mt-5 pt-5 border-t border-amber-200/80 grid grid-cols-1 sm:grid-cols-2 gap-4"
+              >
+                <div>
+                  <label
+                    for="override-closing-time"
+                    class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between"
+                  >
+                    <span>Override Closing Time (HH:MM)</span>
+                    <Clock :size="14" class="text-amber-600" />
+                  </label>
+                  <input
+                    id="override-closing-time"
+                    v-model="settingsForm.override_closing_time"
+                    type="time"
+                    required
+                    class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold font-mono text-slate-900 bg-white"
+                  />
+                  <p class="text-[11px] text-slate-500 mt-1">Temporary closing hour for student ordering and surplus clearance.</p>
+                </div>
+
+                <div>
+                  <label
+                    for="override-expires-at"
+                    class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between"
+                  >
+                    <span>Override Expiration Date</span>
+                    <Calendar :size="14" class="text-amber-600" />
+                  </label>
+                  <input
+                    id="override-expires-at"
+                    v-model="settingsForm.override_expires_at"
+                    type="date"
+                    required
+                    class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold font-mono text-slate-900 bg-white"
+                  />
+                  <p class="text-[11px] text-slate-500 mt-1">Date through which this override will remain in effect.</p>
+                </div>
+              </div>
+            </transition>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 2: FEATURE FLAGS & CONFIGURATION SAVE -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 bg-indigo-100 text-indigo-800 rounded-xl">
+              <Sliders :size="20" />
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-slate-900">Platform Feature Flags</h2>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Enable or disable core system modules dynamically across the cafeteria ecosystem.
+              </p>
+            </div>
+          </div>
+          <span class="text-xs font-semibold text-slate-400">6 Global Feature Flags</span>
+        </div>
+
+        <div class="p-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div
+              v-for="flag in featureFlagsList"
+              :key="flag.key"
+              class="flex items-center justify-between p-4 rounded-xl border transition-all"
+              :class="settingsForm[flag.key] ? 'bg-emerald-50/30 border-emerald-200 shadow-xs' : 'bg-slate-50/70 border-slate-200'"
+            >
+              <div class="pr-4">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-sm font-bold text-slate-900">{{ flag.label }}</span>
+                  <span
+                    class="text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider"
+                    :class="settingsForm[flag.key] ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-slate-200 text-slate-600'"
+                  >
+                    {{ settingsForm[flag.key] ? 'Enabled' : 'Disabled' }}
+                  </span>
+                </div>
+                <p class="text-xs text-slate-500 leading-relaxed">{{ flag.description }}</p>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                :id="'toggle-' + flag.key"
+                :aria-checked="settingsForm[flag.key]"
+                @click="settingsForm[flag.key] = !settingsForm[flag.key]"
+                class="relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                :class="settingsForm[flag.key] ? 'bg-emerald-600' : 'bg-slate-300'"
+              >
+                <span
+                  class="pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
+                  :class="settingsForm[flag.key] ? 'translate-x-7' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Save Configuration Action Button -->
+          <div class="mt-6 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="text-xs text-slate-500">
+              <span v-if="settingsForm.updated_at" class="font-mono">
+                Last persisted: {{ new Date(settingsForm.updated_at).toLocaleTimeString() }}
+              </span>
+              <span v-else>Click save to apply changes to operating hours and feature flags.</span>
+            </div>
+
             <button
-              v-if="settingsForm.global_announcement"
+              id="save-settings-btn"
+              type="button"
+              @click="handleSaveConfiguration"
+              :disabled="savingSettings"
+              class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-2"
+            >
+              <span
+                v-if="savingSettings"
+                class="inline-block animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+              ></span>
+              <Save v-else :size="16" />
+              <span>{{ savingSettings ? "Saving Settings..." : "Save Configuration" }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANEL 3: GLOBAL ANNOUNCEMENTS -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 bg-amber-100 text-amber-800 rounded-xl">
+              <Megaphone :size="20" />
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-slate-900">Global Announcements</h2>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Broadcast urgent notices or system updates across student and vendor portals.
+              </p>
+            </div>
+          </div>
+
+          <span
+            v-if="settingsForm.global_announcement"
+            class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300"
+          >
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            Active Broadcast
+          </span>
+          <span v-else class="text-xs font-medium text-slate-400">No active broadcast</span>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <!-- Active Broadcast Status (if present) -->
+          <div
+            v-if="settingsForm.global_announcement"
+            class="p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+            :class="{
+              'bg-rose-50 border-rose-300 text-rose-950': settingsForm.announcement_severity === 'critical',
+              'bg-amber-50 border-amber-300 text-amber-950': settingsForm.announcement_severity === 'warning',
+              'bg-blue-50 border-blue-300 text-blue-950': !settingsForm.announcement_severity || settingsForm.announcement_severity === 'info'
+            }"
+          >
+            <div class="flex items-start gap-3">
+              <AlertTriangle v-if="settingsForm.announcement_severity === 'critical'" :size="20" class="text-rose-600 shrink-0 mt-0.5" />
+              <AlertCircle v-else-if="settingsForm.announcement_severity === 'warning'" :size="20" class="text-amber-600 shrink-0 mt-0.5" />
+              <Info v-else :size="20" class="text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <div class="flex items-center gap-2 mb-0.5">
+                  <span class="text-xs font-black uppercase tracking-wider">
+                    {{ settingsForm.announcement_severity || 'info' }} Priority Broadcast
+                  </span>
+                  <span v-if="settingsForm.announcement_expires_at" class="text-[11px] opacity-75 font-mono">
+                    Expires: {{ new Date(settingsForm.announcement_expires_at).toLocaleString() }}
+                  </span>
+                </div>
+                <p class="text-sm font-semibold leading-relaxed">{{ settingsForm.global_announcement }}</p>
+              </div>
+            </div>
+
+            <button
               type="button"
               @click="handleClearAnnouncement"
               :disabled="savingAnnouncement"
-              class="px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors disabled:opacity-50"
+              class="px-3.5 py-1.5 text-xs font-bold rounded-lg border bg-white shadow-xs hover:bg-slate-50 transition-colors shrink-0 disabled:opacity-50"
+              :class="{
+                'text-rose-700 border-rose-300': settingsForm.announcement_severity === 'critical',
+                'text-amber-800 border-amber-300': settingsForm.announcement_severity === 'warning',
+                'text-blue-800 border-blue-300': !settingsForm.announcement_severity || settingsForm.announcement_severity === 'info'
+              }"
             >
-              Clear Banner
-            </button>
-            <button
-              id="btn-publish-announcement"
-              type="button"
-              @click="handlePublishAnnouncement"
-              :disabled="
-                savingAnnouncement ||
-                announcementText.trim() ===
-                  (settingsForm.global_announcement || '')
-              "
-              class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1.5"
-            >
-              <Megaphone :size="14" />
-              <span>{{
-                savingAnnouncement ? "Publishing..." : "Publish Announcement"
-              }}</span>
+              Clear Broadcast
             </button>
           </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- Global Operating Configuration Form -->
-    <div
-      class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
-    >
-      <div
-        class="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-      >
-        <div class="flex items-center space-x-3">
-          <div class="p-2 bg-emerald-100 text-emerald-800 rounded-xl">
-            <Sliders :size="20" />
-          </div>
-          <div>
-            <h2 class="text-lg font-bold text-slate-900">
-              Global Cafeteria Operating Settings
-            </h2>
-            <p class="text-xs text-slate-500 mt-0.5">
-              Control reservation expiration TTL, operating hours, and decay
-              parameters.
-            </p>
-          </div>
-        </div>
-
-        <span
-          v-if="settingsForm.updated_at"
-          class="text-xs text-slate-400 font-mono"
-        >
-          Last saved:
-          {{ new Date(settingsForm.updated_at).toLocaleTimeString() }}
-        </span>
-      </div>
-
-      <form @submit.prevent="handleSaveSettings" class="p-8 space-y-6">
-        <div
-          v-if="settingsError"
-          class="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-lg text-sm font-semibold flex items-center"
-        >
-          <AlertCircle :size="18" class="mr-2 shrink-0" />
-          <span>{{ settingsError }}</span>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <!-- Reservation TTL -->
-          <div class="bg-slate-50/60 p-5 rounded-xl border border-slate-200">
-            <label
-              class="block text-sm font-bold text-slate-800 mb-1 flex items-center justify-between"
-            >
-              <span>Reservation Expiry TTL</span>
-              <span
-                class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded"
-                >Minutes</span
-              >
-            </label>
-            <p class="text-xs text-slate-500 mb-3">
-              How long uncollected reserved meals are locked before returning to
-              available inventory.
-            </p>
-            <input
-              id="setting-reservation-ttl"
-              v-model.number="settingsForm.reservation_ttl"
-              type="number"
-              min="1"
-              max="240"
-              required
-              class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold text-slate-800 bg-white"
-            />
-          </div>
-
-          <!-- Opening Time -->
-          <div class="bg-slate-50/60 p-5 rounded-xl border border-slate-200">
-            <label
-              class="block text-sm font-bold text-slate-800 mb-1 flex items-center justify-between"
-            >
-              <span>Daily Opening Time</span>
-              <Clock :size="16" class="text-slate-400" />
-            </label>
-            <p class="text-xs text-slate-500 mb-3">
-              Time the cafeteria counter unlocks for incoming student
-              reservations.
-            </p>
-            <input
-              id="setting-opening-time"
-              v-model="settingsForm.opening_time"
-              type="text"
-              required
-              placeholder="07:00"
-              class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold text-slate-800 bg-white font-mono"
-            />
-          </div>
-
-          <!-- Daily Closing Time (with Today Override) -->
-          <div class="bg-slate-50/60 p-5 rounded-xl border border-slate-200">
-            <div class="flex items-center justify-between mb-1">
-              <label
-                class="text-sm font-bold text-slate-800 flex items-center gap-2"
-              >
-                <span>Daily Closing Time</span>
-                <Clock :size="16" class="text-slate-400" />
+          <!-- Compose Announcement Form -->
+          <div class="space-y-4">
+            <div>
+              <label for="announcement-message" class="block text-xs font-bold uppercase text-slate-600 mb-1.5 flex items-center justify-between">
+                <span>Announcement Message</span>
+                <span
+                  class="text-xs font-mono font-semibold"
+                  :class="announcementForm.message.length >= 190 ? 'text-rose-600 font-bold' : 'text-slate-400'"
+                >
+                  {{ announcementForm.message.length }}/200
+                </span>
               </label>
-              <label
-                class="flex items-center gap-1.5 text-xs text-primary-600 font-semibold cursor-pointer select-none"
-              >
-                <input
-                  type="checkbox"
-                  v-model="settingsForm.override_for_today"
-                  class="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3.5 w-3.5"
-                />
-                <span>Override for today only</span>
-              </label>
+              <textarea
+                id="announcement-message"
+                v-model="announcementForm.message"
+                maxlength="200"
+                rows="3"
+                placeholder="e.g. Scheduled power maintenance: Cafeteria counter closes early at 18:00 today. Please claim orders by 17:45."
+                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none text-sm font-medium text-slate-800 bg-white resize-none"
+              ></textarea>
             </div>
 
-            <p class="text-xs text-slate-500 mb-3">
-              {{
-                settingsForm.override_for_today
-                  ? "Temporary closing time for today only. Will reset automatically tomorrow."
-                  : "The base closing time is set by the vendor under Vendor > Surplus Decay Rules. Admins can temporarily override it for today below."
-              }}
-            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <!-- Severity Dropdown -->
+              <div>
+                <label for="announcement-severity" class="block text-xs font-bold uppercase text-slate-600 mb-1.5">
+                  Severity Level
+                </label>
+                <select
+                  id="announcement-severity"
+                  v-model="announcementForm.severity"
+                  class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none text-sm font-semibold text-slate-800 bg-white"
+                >
+                  <option value="info">Info (Informational Notification)</option>
+                  <option value="warning">Warning (Operational Notice / Schedule Change)</option>
+                  <option value="critical">Critical (Emergency / Urgent Action Required)</option>
+                </select>
+              </div>
 
-            <input
-              id="setting-closing-time"
-              type="time"
-              v-model="activeClosingTimeModel"
-              :disabled="!settingsForm.override_for_today"
-              :class="[
-                'w-full px-4 py-2.5 rounded-lg border outline-none text-base font-bold font-mono transition-colors',
-                settingsForm.override_for_today
-                  ? 'bg-white border-primary-400 text-slate-900 focus:ring-2 focus:ring-primary-500 cursor-text'
-                  : 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed',
-              ]"
-            />
+              <!-- Expiry Input -->
+              <div>
+                <label for="announcement-expires-at" class="block text-xs font-bold uppercase text-slate-600 mb-1.5">
+                  Expiry Date & Time (Optional)
+                </label>
+                <input
+                  id="announcement-expires-at"
+                  v-model="announcementForm.expires_at"
+                  type="datetime-local"
+                  class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none text-sm font-semibold text-slate-800 bg-white"
+                />
+              </div>
+            </div>
 
-            <p
-              v-if="settingsForm.override_for_today"
-              class="text-[11px] text-amber-700 font-medium mt-2"
-            >
-              Note: Override is active for today. This will temporarily control
-              cafeteria closing behavior.
-            </p>
-            <p v-else class="text-[11px] text-slate-400 font-medium mt-2">
-              Note: Check "Override for today only" above to edit closing hours
-              temporarily.
-            </p>
-          </div>
-          <!-- Max Discount Quantity -->
-          <div class="bg-slate-50/60 p-5 rounded-xl border border-slate-200">
-            <label class="block text-sm font-bold text-slate-800 mb-1">
-              Max Discount Quantity / Order
-            </label>
-            <p class="text-xs text-slate-500 mb-3">
-              Maximum subsidized discount servings allowed per single
-              transaction.
-            </p>
-            <input
-              id="setting-max-discount-qty"
-              v-model.number="settingsForm.max_discount_qty"
-              type="number"
-              min="1"
-              max="50"
-              required
-              class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none text-base font-bold text-slate-800 bg-white"
-            />
+            <!-- Publish Button -->
+            <div class="flex items-center justify-end pt-2">
+              <button
+                id="btn-publish-announcement"
+                type="button"
+                @click="handlePublishAnnouncement"
+                :disabled="savingAnnouncement || !announcementForm.message.trim()"
+                class="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+              >
+                <Megaphone :size="16" />
+                <span>{{ savingAnnouncement ? "Publishing..." : "Publish Announcement" }}</span>
+              </button>
+            </div>
           </div>
         </div>
-
-        <!-- Form Actions -->
-        <div
-          class="pt-6 border-t border-slate-100 flex items-center justify-end"
-        >
-          <button
-            id="save-settings-btn"
-            type="submit"
-            :disabled="savingSettings"
-            class="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm transition-colors disabled:opacity-50 flex items-center space-x-2"
-          >
-            <span
-              v-if="savingSettings"
-              class="inline-block animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"
-            ></span>
-            <Save v-else :size="16" />
-            <span>{{
-              savingSettings ? "Saving Settings..." : "Save Configuration"
-            }}</span>
-          </button>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
 </template>
@@ -686,8 +821,14 @@ import {
   Save,
   Sparkles,
   Megaphone,
+  LayoutDashboard,
+  Calendar,
+  AlertTriangle,
+  Info,
+  Layers,
 } from "lucide-vue-next";
 
+const activeTab = ref("settings");
 const loadingMetrics = ref(false);
 const loadingSettings = ref(false);
 const savingSettings = ref(false);
@@ -711,26 +852,65 @@ const settingsForm = reactive({
   reservation_ttl: 30,
   opening_time: "07:00",
   closing_time: "20:00",
+  effective_closing_time: "20:00",
   override_closing_time: "20:00",
+  override_expires_at: "",
   override_for_today: false,
+  is_override_active: false,
   max_discount_qty: 5,
   ai_enabled: true,
+  enable_reservations: true,
+  enable_paymongo: true,
+  enable_ai_recipe_generation: true,
+  enable_global_announcements: true,
+  enable_decay_pricing: true,
+  enable_reservation_quota_suggestions: true,
   global_announcement: null,
+  announcement_severity: "info",
+  announcement_expires_at: null,
   updated_at: "",
 });
 
-const activeClosingTimeModel = computed({
-  get() {
-    return settingsForm.override_for_today
-      ? settingsForm.override_closing_time
-      : settingsForm.closing_time;
-  },
-  set(val) {
-    if (settingsForm.override_for_today) {
-      settingsForm.override_closing_time = val;
-    }
-  },
+const overrideClosingTimeEnabled = ref(false);
+
+const announcementForm = reactive({
+  message: "",
+  severity: "info",
+  expires_at: "",
 });
+
+const featureFlagsList = [
+  {
+    key: "enable_reservations",
+    label: "Online Meal Reservations",
+    description: "Allows students to pre-order, reserve, and schedule meal pickups in advance.",
+  },
+  {
+    key: "enable_paymongo",
+    label: "PayMongo Online Payments",
+    description: "Enables digital payment gateway (GCash, Maya, Card) for express pickups.",
+  },
+  {
+    key: "enable_ai_recipe_generation",
+    label: "AI Recipe & Dish Generation",
+    description: "Unlocks automated recipe breakdowns, macro calculations, and AI dish generation.",
+  },
+  {
+    key: "enable_global_announcements",
+    label: "Global Announcements Banner",
+    description: "Enables platform-wide emergency, operational, and informational banner broadcasts.",
+  },
+  {
+    key: "enable_decay_pricing",
+    label: "Surplus Decay Dynamic Pricing",
+    description: "Enables progressive price discounts on surplus meals approaching closing time.",
+  },
+  {
+    key: "enable_reservation_quota_suggestions",
+    label: "AI Reservation Quota Suggestions",
+    description: "Provides smart inventory recommendations and portion quota suggestions for vendors.",
+  },
+];
 
 const fetchMetrics = async () => {
   loadingMetrics.value = true;
@@ -757,22 +937,54 @@ const fetchSettings = async () => {
     if (!res.ok) {
       throw new Error(data.error || "Failed to fetch settings.");
     }
-    const s = data.settings || data.data;
+    const s = data.settings || data.data || data;
     if (s) {
       Object.assign(settingsForm, s);
-      settingsForm.override_closing_time = s.override_closing_time
-        ? s.override_closing_time.slice(0, 5)
-        : s.closing_time || "20:00";
+
+      // Handle override closing time format (HH:MM)
+      if (s.override_closing_time) {
+        settingsForm.override_closing_time = s.override_closing_time.slice(0, 5);
+      } else {
+        settingsForm.override_closing_time = (s.closing_time || "20:00").slice(0, 5);
+      }
+
+      // Handle override expiration date format (YYYY-MM-DD)
+      const expires = s.override_expires_at || s.override_closing_date;
+      if (expires) {
+        settingsForm.override_expires_at = expires.slice(0, 10);
+      } else {
+        settingsForm.override_expires_at = "";
+      }
+
+      // Check whether override is currently enabled/active
       const todayManila = new Intl.DateTimeFormat("en-CA", {
         timeZone: "Asia/Manila",
       }).format(new Date());
-      const isDateToday =
-        s.override_closing_date &&
-        s.override_closing_date.slice(0, 10) === todayManila;
-      settingsForm.override_for_today = Boolean(
-        s.is_override_active || (isDateToday && s.override_closing_time),
+      const isDateActive = expires && expires.slice(0, 10) >= todayManila;
+
+      overrideClosingTimeEnabled.value = Boolean(
+        s.is_override_active || (isDateActive && s.override_closing_time)
       );
-      announcementText.value = s.global_announcement || "";
+
+      // Cast boolean flags safely
+      const boolKeys = [
+        "enable_reservations",
+        "enable_paymongo",
+        "enable_ai_recipe_generation",
+        "enable_global_announcements",
+        "enable_decay_pricing",
+        "enable_reservation_quota_suggestions",
+        "ai_enabled",
+      ];
+      boolKeys.forEach((k) => {
+        if (s[k] !== undefined) {
+          settingsForm[k] = Boolean(s[k]);
+        }
+      });
+
+      if (s.global_announcement) {
+        announcementText.value = s.global_announcement;
+      }
     }
   } catch (err) {
     console.error("Error fetching settings:", err);
@@ -797,12 +1009,12 @@ const handleToggleAi = async () => {
   const targetState = !settingsForm.ai_enabled;
   try {
     const res = await fetch("/api/admin/settings", {
-      method: "POST",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        ai_enabled: targetState,
+        enable_ai_recipe_generation: targetState,
       }),
     });
 
@@ -811,18 +1023,14 @@ const handleToggleAi = async () => {
       throw new Error(data.error || "Failed to update AI state.");
     }
 
-    if (data.settings) {
-      Object.assign(settingsForm, data.settings);
-    } else {
-      settingsForm.ai_enabled = targetState;
-    }
+    settingsForm.ai_enabled = targetState;
+    settingsForm.enable_ai_recipe_generation = targetState;
 
-    successMessage.value = `AI Generation ${settingsForm.ai_enabled ? "enabled" : "disabled (kill switch engaged)"} successfully.`;
+    successMessage.value = `AI Generation ${settingsForm.ai_enabled ? "enabled" : "disabled"} successfully.`;
     setTimeout(() => {
       successMessage.value = "";
     }, 4000);
 
-    // Re-fetch metrics to refresh telemetry
     await fetchMetrics();
   } catch (err) {
     console.error("Error toggling AI:", err);
@@ -832,53 +1040,44 @@ const handleToggleAi = async () => {
   }
 };
 
-const handleSaveSettings = async () => {
+const handleSaveConfiguration = async () => {
   settingsError.value = "";
   savingSettings.value = true;
   try {
+    const payload = {
+      override_closing_time: overrideClosingTimeEnabled.value
+        ? settingsForm.override_closing_time
+        : null,
+      override_expires_at: overrideClosingTimeEnabled.value
+        ? settingsForm.override_expires_at
+        : null,
+      enable_reservations: Boolean(settingsForm.enable_reservations),
+      enable_paymongo: Boolean(settingsForm.enable_paymongo),
+      enable_ai_recipe_generation: Boolean(settingsForm.enable_ai_recipe_generation),
+      enable_global_announcements: Boolean(settingsForm.enable_global_announcements),
+      enable_decay_pricing: Boolean(settingsForm.enable_decay_pricing),
+      enable_reservation_quota_suggestions: Boolean(settingsForm.enable_reservation_quota_suggestions),
+    };
+
     const res = await fetch("/api/admin/settings", {
-      method: "POST",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        reservation_ttl: settingsForm.reservation_ttl,
-        opening_time: settingsForm.opening_time,
-        max_discount_qty: settingsForm.max_discount_qty,
-        ai_enabled: settingsForm.ai_enabled,
-        override_for_today: settingsForm.override_for_today,
-        override_closing_time: settingsForm.override_for_today
-          ? settingsForm.override_closing_time
-          : null,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || "Failed to update settings.");
+      throw new Error(data.error || "Failed to update configuration.");
     }
 
-    const s = data.settings || data.data;
-    if (s) {
-      Object.assign(settingsForm, s);
-      settingsForm.override_closing_time = s.override_closing_time
-        ? s.override_closing_time.slice(0, 5)
-        : s.closing_time || "20:00";
-      const todayManila = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Manila",
-      }).format(new Date());
-      const isDateToday =
-        s.override_closing_date &&
-        s.override_closing_date.slice(0, 10) === todayManila;
-      settingsForm.override_for_today = Boolean(
-        s.is_override_active || (isDateToday && s.override_closing_time),
-      );
-    }
-
-    successMessage.value = "Global cafeteria settings saved successfully!";
+    successMessage.value = "System configuration saved successfully!";
     setTimeout(() => {
       successMessage.value = "";
     }, 4000);
+
+    await fetchSettings();
   } catch (err) {
     console.error("Save settings error:", err);
     settingsError.value = err.message;
@@ -887,16 +1086,35 @@ const handleSaveSettings = async () => {
   }
 };
 
+const handleSaveSettings = handleSaveConfiguration;
+
 const handlePublishAnnouncement = async () => {
   savingAnnouncement.value = true;
   pageError.value = "";
   try {
-    const res = await fetch("/api/admin/settings", {
+    const msg = announcementForm.message.trim();
+    if (!msg) {
+      throw new Error("Announcement message cannot be empty.");
+    }
+
+    let formattedExpiry = null;
+    if (announcementForm.expires_at) {
+      formattedExpiry = announcementForm.expires_at.replace("T", " ");
+      if (formattedExpiry.length === 16) {
+        formattedExpiry += ":00";
+      }
+    }
+
+    const payload = {
+      global_announcement: msg,
+      announcement_severity: announcementForm.severity || "info",
+      announcement_expires_at: formattedExpiry,
+    };
+
+    const res = await fetch("/api/admin/settings/announcement", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        global_announcement: announcementText.value.trim(),
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
@@ -904,16 +1122,19 @@ const handlePublishAnnouncement = async () => {
       throw new Error(data.error || "Failed to publish announcement.");
     }
 
-    if (data.settings) {
-      Object.assign(settingsForm, data.settings);
-      announcementText.value = data.settings.global_announcement || "";
-    }
+    // Clear form inputs on success as required:
+    announcementForm.message = "";
+    announcementForm.severity = "info";
+    announcementForm.expires_at = "";
 
-    successMessage.value = "Global announcement published successfully!";
+    successMessage.value = "Announcement published successfully!";
     setTimeout(() => {
       successMessage.value = "";
     }, 4000);
+
+    await fetchSettings();
   } catch (err) {
+    console.error("Publish announcement error:", err);
     pageError.value = err.message;
   } finally {
     savingAnnouncement.value = false;
@@ -924,11 +1145,13 @@ const handleClearAnnouncement = async () => {
   savingAnnouncement.value = true;
   pageError.value = "";
   try {
-    const res = await fetch("/api/admin/settings", {
+    const res = await fetch("/api/admin/settings/announcement", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         global_announcement: "",
+        announcement_severity: "info",
+        announcement_expires_at: null,
       }),
     });
 
@@ -937,15 +1160,12 @@ const handleClearAnnouncement = async () => {
       throw new Error(data.error || "Failed to clear announcement.");
     }
 
-    if (data.settings) {
-      Object.assign(settingsForm, data.settings);
-      announcementText.value = "";
-    }
-
-    successMessage.value = "Global announcement cleared.";
+    successMessage.value = "Global announcement cleared successfully.";
     setTimeout(() => {
       successMessage.value = "";
     }, 4000);
+
+    await fetchSettings();
   } catch (err) {
     pageError.value = err.message;
   } finally {
