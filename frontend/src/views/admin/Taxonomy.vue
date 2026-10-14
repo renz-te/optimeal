@@ -270,18 +270,44 @@
             </p>
           </div>
 
-          <button
-            @click="fetchQueue"
-            class="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 rounded-lg text-xs font-bold text-slate-700 transition-colors"
-          >
-            Refresh Queue
-          </button>
+          <div class="flex items-center gap-3">
+            <!-- Bulk Approve Action Button -->
+            <button
+              v-if="selectedSubmissions.length > 0"
+              id="btn-bulk-approve"
+              @click="handleBulkApprove"
+              :disabled="bulkApproving"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center space-x-1.5 disabled:opacity-50"
+            >
+              <CheckCheck :size="15" />
+              <span>{{ bulkApproving ? 'Approving...' : `Bulk Approve (${selectedSubmissions.length})` }}</span>
+            </button>
+
+            <button
+              @click="fetchQueue"
+              class="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-50 rounded-lg text-xs font-bold text-slate-700 transition-colors"
+            >
+              Refresh Queue
+            </button>
+          </div>
         </div>
 
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-200">
+                <th class="w-12 px-4 py-4 text-center">
+                  <input
+                    type="checkbox"
+                    id="checkbox-select-all"
+                    :checked="isAllSelected"
+                    :indeterminate.prop="isIndeterminate"
+                    @change="toggleSelectAll"
+                    :disabled="pendingQueue.length === 0"
+                    class="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer disabled:opacity-50"
+                    title="Select All Pending Submissions"
+                  />
+                </th>
                 <th class="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Unrecognized Raw String</th>
                 <th class="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Date Submitted</th>
                 <th class="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
@@ -290,13 +316,13 @@
             </thead>
             <tbody class="divide-y divide-slate-100">
               <tr v-if="loadingQueue">
-                <td colspan="4" class="px-6 py-8 text-center text-slate-500 font-medium">
+                <td colspan="5" class="px-6 py-8 text-center text-slate-500 font-medium">
                   <span class="inline-block animate-spin w-5 h-5 border-2 border-amber-600 border-t-transparent rounded-full mr-2 align-middle"></span>
                   Checking for pending submissions...
                 </td>
               </tr>
               <tr v-else-if="pendingQueue.length === 0">
-                <td colspan="4" class="px-6 py-12 text-center text-slate-400 font-medium">
+                <td colspan="5" class="px-6 py-12 text-center text-slate-400 font-medium">
                   <div class="max-w-sm mx-auto flex flex-col items-center">
                     <div class="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mb-3">
                       <CheckCircle :size="24" class="text-emerald-500" />
@@ -311,7 +337,17 @@
                 :key="sub.id"
                 :id="`submission-row-${sub.id}`"
                 class="hover:bg-slate-50/50 transition-colors"
+                :class="selectedSubmissions.includes(sub.id) ? 'bg-emerald-50/40' : ''"
               >
+                <td class="px-4 py-4 text-center">
+                  <input
+                    type="checkbox"
+                    :id="`checkbox-sub-${sub.id}`"
+                    :value="sub.id"
+                    v-model="selectedSubmissions"
+                    class="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                  />
+                </td>
                 <td class="px-6 py-4">
                   <div class="flex items-center space-x-2">
                     <span class="px-3 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg font-mono text-sm font-bold">
@@ -608,7 +644,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Plus, Edit2, X, Search, AlertCircle, CheckCircle, ShieldAlert, Clock, Link2, Trash2 } from 'lucide-vue-next'
+import { Plus, Edit2, X, Search, AlertCircle, CheckCircle, ShieldAlert, Clock, Link2, Trash2, CheckCheck } from 'lucide-vue-next'
 
 const activeTab = ref('registry')
 
@@ -616,6 +652,8 @@ const allergens = ref([])
 const sensitivities = ref([])
 const ingredients = ref([])
 const pendingQueue = ref([])
+const selectedSubmissions = ref([])
+const bulkApproving = ref(false)
 const loadingTaxonomy = ref(false)
 const loadingQueue = ref(false)
 const pageError = ref('')
@@ -679,10 +717,72 @@ const fetchQueue = async () => {
       throw new Error(data.error || 'Failed to load pending queue.')
     }
     pendingQueue.value = Array.isArray(data) ? data : []
+    selectedSubmissions.value = []
   } catch (err) {
     console.error('Error fetching queue:', err)
   } finally {
     loadingQueue.value = false
+  }
+}
+
+// Bulk Selection and Approval
+const isAllSelected = computed(() => {
+  return pendingQueue.value.length > 0 && selectedSubmissions.value.length === pendingQueue.value.length
+})
+
+const isIndeterminate = computed(() => {
+  return selectedSubmissions.value.length > 0 && selectedSubmissions.value.length < pendingQueue.value.length
+})
+
+const toggleSelectAll = (e) => {
+  if (e.target.checked) {
+    selectedSubmissions.value = pendingQueue.value.map(s => s.id)
+  } else {
+    selectedSubmissions.value = []
+  }
+}
+
+const handleBulkApprove = async () => {
+  if (selectedSubmissions.value.length === 0) return
+  if (!confirm(`Are you sure you want to approve ${selectedSubmissions.value.length} pending ingredient(s) in bulk?`)) {
+    return
+  }
+
+  bulkApproving.value = true
+  pageError.value = ''
+  successMessage.value = ''
+
+  try {
+    const res = await fetch('/api/admin/taxonomy/bulk-approve', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ submission_ids: selectedSubmissions.value })
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to bulk approve ingredients.')
+    }
+
+    // Dynamically update table state without reloading
+    const approvedSet = new Set(data.approved_ids || selectedSubmissions.value)
+    pendingQueue.value = pendingQueue.value.filter(s => !approvedSet.has(s.id))
+    selectedSubmissions.value = []
+
+    successMessage.value = data.message || `Successfully approved ${approvedSet.size} ingredient(s).`
+    setTimeout(() => {
+      if (successMessage.value.startsWith('Successfully approved')) {
+        successMessage.value = ''
+      }
+    }, 5000)
+
+    // Synchronize taxonomy registry in the background
+    await fetchTaxonomy()
+  } catch (err) {
+    console.error('Bulk approval error:', err)
+    pageError.value = err.message || 'An error occurred during bulk approval.'
+  } finally {
+    bulkApproving.value = false
   }
 }
 

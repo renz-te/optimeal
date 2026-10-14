@@ -537,6 +537,123 @@ function handleResolveSubmission($pdo)
     }
 }
 
+function handleBulkApproveSubmissions($pdo)
+{
+    $input = json_decode(file_get_contents('php://input'), true);
+    $submissionIds = $input['submission_ids'] ?? ($input['ids'] ?? []);
+
+    if (!is_array($submissionIds) || empty($submissionIds)) {
+        jsonResponse(['error' => 'submission_ids must be a non-empty array of IDs.'], 400);
+    }
+
+    $submissionIds = array_values(array_unique(array_filter(array_map('intval', $submissionIds))));
+    if (empty($submissionIds)) {
+        jsonResponse(['error' => 'No valid submission IDs provided.'], 400);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $placeholders = str_repeat('?,', count($submissionIds) - 1) . '?';
+        $stmt = $pdo->prepare("SELECT id, raw_name FROM ingredient_submissions WHERE id IN ($placeholders) AND status = 'pending' FOR UPDATE");
+        $stmt->execute($submissionIds);
+        $submissions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($submissions)) {
+            $pdo->rollBack();
+            jsonResponse(['error' => 'No pending submissions found matching the provided IDs.'], 404);
+        }
+
+        // Cache existing critical allergens for auto-mapping
+        $allergens = $pdo->query("SELECT id, LOWER(name) as name FROM critical_allergens")->fetchAll(PDO::FETCH_ASSOC);
+        $allergenMap = [];
+        foreach ($allergens as $a) {
+            $allergenMap[$a['name']] = (int)$a['id'];
+        }
+
+        $checkIngStmt = $pdo->prepare("SELECT id, name FROM ingredients WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1");
+        $insertIngStmt = $pdo->prepare("INSERT INTO ingredients (name) VALUES (?)");
+        $updateSubStmt = $pdo->prepare("UPDATE ingredient_submissions SET status = 'approved', resolved_ingredient_id = ? WHERE id = ?");
+        $updateRecipeIngStmt = $pdo->prepare("UPDATE recipe_ingredients SET ingredient_id = ? WHERE LOWER(TRIM(ingredient_name)) = LOWER(TRIM(?)) AND ingredient_id IS NULL");
+        $insertAllergenMapStmt = $pdo->prepare("INSERT IGNORE INTO ingredient_allergen_map (ingredient_id, allergen_id) VALUES (?, ?)");
+
+        $approved = [];
+        $resolvedSummary = [];
+
+        foreach ($submissions as $sub) {
+            $rawName = trim($sub['raw_name']);
+            if ($rawName === '') {
+                continue;
+            }
+
+            // Check if ingredient exists
+            $checkIngStmt->execute([$rawName]);
+            $existing = $checkIngStmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($existing) {
+                $ingredientId = (int)$existing['id'];
+                $ingredientName = $existing['name'];
+            } else {
+                $insertIngStmt->execute([$rawName]);
+                $ingredientId = (int)$pdo->lastInsertId();
+                $ingredientName = $rawName;
+
+                // Auto-map allergen if raw name matches any critical allergen keyword
+                $rawLower = strtolower($rawName);
+                foreach ($allergenMap as $aName => $aId) {
+                    if (str_contains($rawLower, $aName) || str_contains($aName, $rawLower)) {
+                        $insertAllergenMapStmt->execute([$ingredientId, $aId]);
+                    }
+                }
+            }
+
+            // Resolve submission
+            $updateSubStmt->execute([$ingredientId, $sub['id']]);
+
+            // Link any recipes that referenced this ingredient string
+            $updateRecipeIngStmt->execute([$ingredientId, $rawName]);
+
+            $approved[] = (int)$sub['id'];
+            $resolvedSummary[] = [
+                'submission_id' => (int)$sub['id'],
+                'raw_name' => $rawName,
+                'ingredient_id' => $ingredientId,
+                'ingredient_name' => $ingredientName
+            ];
+        }
+
+        // Record bulk action in admin_audit_log
+        $adminId = $_SESSION['user_id'] ?? 0;
+        logAdminAudit($pdo, $adminId, null, 'bulk_approve_taxonomy', [
+            'approved_count' => count($approved),
+            'submission_ids' => $approved,
+            'resolved' => $resolvedSummary
+        ]);
+
+        $pdo->commit();
+
+        jsonResponse([
+            'success' => true,
+            'message' => 'Successfully approved ' . count($approved) . ' pending ingredient(s).',
+            'approved_count' => count($approved),
+            'approved_ids' => $approved,
+            'resolved' => $resolvedSummary
+        ]);
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleBulkApproveSubmissions PDO error: " . $e->getMessage());
+        jsonResponse(['error' => 'Database error while approving submissions.'], 500);
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("handleBulkApproveSubmissions error: " . $e->getMessage());
+        jsonResponse(['error' => 'An unexpected internal server error occurred.'], 500);
+    }
+}
+
 function handleGetSettings($pdo)
 {
     $stmt = $pdo->query("SELECT * FROM settings WHERE id = 1");

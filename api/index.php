@@ -235,6 +235,10 @@ if ($route === '/auth/register' && $method === 'POST') {
     requireAdmin($pdo);
     require 'routes/admin.php';
     handleResolveSubmission($pdo);
+} elseif (($route === '/admin/taxonomy/bulk-approve' || $route === '/api/admin/taxonomy/bulk-approve') && in_array($method, ['PATCH', 'POST'])) {
+    requireAdmin($pdo);
+    require 'routes/admin.php';
+    handleBulkApproveSubmissions($pdo);
 } elseif (($route === '/admin/settings' || $route === '/api/admin/settings') && $method === 'GET') {
     requireRole($pdo, ['admin']);
     require 'routes/admin.php';
